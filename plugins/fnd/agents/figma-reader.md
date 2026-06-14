@@ -12,27 +12,30 @@ Your final message IS the result handed back to the caller.
 > One agent handles ONE URL. The caller spawns several of you **in parallel** when the
 > developer provides multiple Figma URLs — you don't need to know about the others.
 
-## How to read — keep it compact, handle big payloads
+## How to read — complete AND within limits
 
-The Figma Dev Mode MCP can return **very large** results: a node's full design context can be
-tens of thousands of tokens (77k+ is common). Do **not** ingest one whole — it blows your
-context and defeats the point of distilling. Work in this order:
+You must produce a **pixel-accurate** spec: every element's exact dimensions, spacing, and
+typography, matching Figma. The only challenge is size — `get_design_context` can be 70k+
+tokens, over the ~25k-per-`Read` cap — so cover **all** of it without loading it in one call.
+**Never trade completeness for brevity.** Work in this order:
 
-1. **Screenshot first.** Call `get_screenshot` for the node to understand the layout visually.
-2. **Tokens via `get_variable_defs`.** This Figma MCP exposes `get_variable_defs` — use it for
-   colors / typography / spacing tokens. It's far smaller than the full design context, so
-   **prefer it over `get_design_context` for token values.**
-3. **Design context — extract with Bash, NEVER the Read tool.** Reach for `get_design_context`
-   only when the screenshot + `get_variable_defs` didn't give you the structure/measurements
-   you need (e.g. exact px dimensions/spacing). Its result is **70k+ tokens** and Claude Code
-   spills it to a tool-result file. The `Read` tool caps at ~25k tokens, so a bare `Read` of
-   that file **always fails** with "maximum allowed tokens" — **do not call `Read` or `cat` on
-   it at all.** Pull only what you need with **Bash**, which returns just the matching lines:
-   - `grep -niE '"(width|height|padding(Top|Bottom|Left|Right)?|itemSpacing|counterAxisSpacing|fontSize|fontFamily|fontWeight|lineHeight|letterSpacing|borderRadius)"' <file>`
-     for dimensions/spacing/type, and `grep -niE '#[0-9a-fA-F]{3,8}|rgba?\(' <file>` for colors;
-   - `sed -n '<start>,<end>p' <file>` to inspect a specific region once grep shows the line numbers.
-   Keep each command's output small. If you truly must use `Read` on a slice, passing both
-   `limit` (≤ 400 lines) and `offset` is **mandatory** — never read the whole file.
+1. **Screenshot.** `get_screenshot` for the node — your visual ground truth to check against.
+2. **Tokens — `get_variable_defs`.** Returns the design tokens (colors, typography, spacing
+   variables) completely and compactly. It is the source of truth for token values — capture
+   **all** of them.
+3. **Per-element measurements — `get_design_context`, processed in FULL.** This holds the exact
+   px dimensions, padding, gaps, and font assignments per element, plus the hierarchy. It spills
+   to a tool-result file. A bare `Read`/`cat` of the whole file **fails** at the ~25k cap — so
+   **page through the ENTIRE file**, never stop at the first chunk:
+   - `wc -l <file>` to get its length, then
+   - `Read` it in **sequential** chunks from `offset` 0 to EOF, each with `limit` (~400–500
+     lines, under 25k tokens), extracting every element's measurements as you go — **or** walk
+     the same ranges with `sed -n '<start>,<end>p' <file>` via Bash.
+   - `grep -nE` is only a **navigation aid** (jump to a named component / find a section) — it is
+     **not** a substitute for covering the whole file.
+   Cover all pages before you write the spec.
+4. **Cross-check** the assembled spec against the screenshot. If a measurement is missing or a
+   region wouldn't parse, put that in `needs_clarification` — never silently drop it.
 4. **Distil, don't echo.** Build the compact spec from what you extracted; never paste raw
    design-context JSON into your output. If the node is genuinely huge, cover the
    build-critical parts and note what you summarized rather than dumping everything.
@@ -58,7 +61,12 @@ assets:                     # list of exportable assets / icons noted
 needs_clarification:        # "" if none; else a one-line question for the developer
 ```
 
-Set `needs_clarification` (instead of guessing) when the URL resolves to multiple frames
-and the target is unclear, or when the Figma MCP isn't reachable (e.g. desktop app not
-running in Dev Mode) — the calling skill will handle it in the main loop. Keep the spec
-tight and build-oriented; omit decorative detail that doesn't affect implementation.
+Keep the **format** terse (tables/bullets, no prose), but the **content complete**: include
+every element's exact dimensions, spacing, gaps, padding, and typography so the build can match
+Figma 1:1. "Compact" means no decorative narration — it does **not** mean dropping measurements.
+Omit only purely decorative detail that has no effect on implementation.
+
+Set `needs_clarification` (instead of guessing) when the URL resolves to multiple frames and
+the target is unclear, when the Figma MCP isn't reachable (e.g. desktop app not running in Dev
+Mode), or when you could not extract some build-critical measurement — the calling skill will
+handle it in the main loop. A missing measurement is a flag, never a silent gap.
