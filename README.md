@@ -7,27 +7,34 @@ theme work.
 
 ## What's inside
 
+This repo is a **marketplace** (a catalog) that hosts one or more **plugins**, each
+in its own subfolder under `plugins/`:
+
 ```
 .
 ├── .claude-plugin/
-│   ├── plugin.json          # Plugin manifest
-│   └── marketplace.json     # Marketplace entry (for install)
-├── skills/                  # 15 workflow skills (see table below)
-│   ├── develop-feature-or-fix/SKILL.md
-│   ├── write-technical-approach/SKILL.md
-│   └── ...
-├── agents/                  # subagents the skills delegate to
-│   ├── change-reviewer.md   #   reviews a diff (hygiene + conformance)
-│   ├── jira-reader.md       #   reads a ticket → structured fields
-│   └── figma-reader.md      #   reads one Figma frame → build spec
-├── references/              # Shared docs the skills read
-│   ├── jira-custom-fields.md
-│   ├── technical-approach-format.md
-│   ├── review-flow.md       # shared contract for the review/marker flow
-│   └── ...
+│   └── marketplace.json         # marketplace catalog (lists the plugins)
+├── plugins/
+│   └── fnd/                      # the Foundation plugin (self-contained)
+│       ├── .claude-plugin/
+│       │   └── plugin.json       # plugin manifest (+ bundled mcpServers)
+│       ├── skills/               # 15 workflow skills (see table below)
+│       │   ├── develop-feature-or-fix/SKILL.md
+│       │   └── ...
+│       ├── agents/               # subagents the skills delegate to
+│       │   ├── change-reviewer.md   #  reviews a diff (hygiene + conformance)
+│       │   ├── jira-reader.md       #  reads a ticket → structured fields
+│       │   └── figma-reader.md      #  reads one Figma frame → build spec
+│       └── references/           # shared docs the skills read
+│           ├── jira-custom-fields.md
+│           ├── review-flow.md    #  shared contract for the review/marker flow
+│           └── ...
 ├── LICENSE
 └── README.md
 ```
+
+To add another plugin later: create `plugins/<name>/` (with its own
+`.claude-plugin/plugin.json`) and add an entry to `marketplace.json` → `plugins[]`.
 
 > **Note on rules.** Project coding conventions (`css-conventions`,
 > `liquid-conventions`, `protected-core`, …) are **not** shipped in this plugin.

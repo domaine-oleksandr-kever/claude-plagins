@@ -9,7 +9,7 @@
   "plugins": [
     {
       "name": "fnd",
-      "source": "./",
+      "source": "./plugins/fnd",
       "description": "Domaine Foundation skills — Agentic Assisted Development workflow for Shopify theme work.",
       "license": "MIT"
     }
