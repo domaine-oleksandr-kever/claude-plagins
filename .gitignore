@@ -1,0 +1,19 @@
+# OS / editor cruft
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Node (if you add tooling)
+node_modules/
+npm-debug.log*
+
+# Local plugin state / scratch
+*.local
+.env
+
+# Claude Code local (per-user) settings — not shared
+.claude/settings.local.json
+
+# Work-in-progress planning notes (kept untracked on purpose)
+AGENTS_PLAN.md
