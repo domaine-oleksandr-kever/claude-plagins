@@ -32,7 +32,7 @@ Series position: Workflow 3 — runs after `write-technical-approach`, before `q
 ## Global rules
 
 - **Never proceed past a ✋ checkpoint** without explicit engineer confirmation.
-- **Atlassian MCP** for Jira; **Figma MCP** for design extraction; **Chrome DevTools MCP** for in-browser validation when the preview is running. Ticket and design **reads are delegated to the `jira-reader` / `figma-reader` subagents** so raw ADF / node trees stay out of this context — see step 1 and step 4.
+- **Atlassian MCP** for Jira; **Figma MCP** for design extraction; **Chrome DevTools MCP** for in-browser validation when the preview is running. Ticket / design / codebase **reads are delegated to the `jira-reader`, `figma-reader`, and `theme-explorer` subagents** so raw ADF, node trees, and broad search stay out of this context — see steps 1, 3, 4.
 - **Browser-MCP prerequisite:** the local dev server must be running (see `${CLAUDE_PLUGIN_ROOT}/references/preflight-checklist.md` → Local dev server). Confirm before validation.
 - Respect the repo's coding rules. **Extend — never directly modify** `src/entry/core/*` JS/TS; prefer extending or composing core Liquid blocks/snippets per project conventions.
 
@@ -40,9 +40,15 @@ Series position: Workflow 3 — runs after `write-technical-approach`, before `q
 
 ## Phase 1 — Analysis & planning `[plan mode]`
 
+**Kick off the reads in parallel.** When the task scope is already clear (the ticket is in
+context or the request is explicit), spawn `jira-reader`, the `figma-reader`(s), and
+`theme-explorer` **concurrently** — they're independent. If the scope is only defined by the
+ticket you're still fetching, start `theme-explorer` once `jira-reader` returns the AC / TA so
+it knows what to map. Steps 1, 3, 4 describe each read; steps 2 and 5–6 run after they return.
+
 1. **Ingest the Jira ticket.** **Context-first:** if the conversation context already contains *all* required fields (Description, AC, Technical Approach, Figma URL) in full — not summarized or truncated, e.g. from an earlier skill run or a pasted ticket — use that and **skip the fetch**. Otherwise **delegate to the `jira-reader` subagent** (pass the ticket key/URL): it reads via Atlassian MCP, applies `${CLAUDE_PLUGIN_ROOT}/references/jira-custom-fields.md`, and returns the structured fields plus any `figma_urls`, keeping the raw ADF out of this context. If it returns `needs_clarification`, ask the engineer. A field it reports empty is genuinely empty — warn the engineer.
 2. **Validate readiness** — if any are missing, **stop** and warn: Description, Acceptance Criteria, Technical Approach, Figma URL pointing to a **specific node**.
-3. **Analyse the codebase** — map current implementation to the TA + AC; note files to change, new files, schema/locale impacts, manual checks.
+3. **Analyse the codebase** — delegate the broad search to the `theme-explorer` subagent (read-only scout): seed it with the task intent; it reads the project's `.claude/rules` + theme layout and returns an **impact map** (relevant files, patterns to follow, new files, schema/locale/settings impacts, rule constraints, open questions), keeping the wide search out of this context. **Then read the load-bearing files it points to yourself** — the scout finds breadth; you build the real understanding the plan and interview need. Do **not** plan from its summary alone.
 4. **Analyse Figma** — for each Figma URL on the ticket (from the `jira-reader` output or the engineer), **spawn one `figma-reader` subagent per URL, in parallel**; each returns a compact build spec. These can run in parallel with the codebase analysis (step 3). If a URL has no node id or the target frame is unclear (a `figma-reader` returns `needs_clarification`), **ask** for the correct link.
 5. **Interview the engineer until you reach shared understanding** — walk down each branch of the design tree, resolving dependencies between decisions one-by-one. **Ask questions one at a time**, and **for each, give your recommended answer**. If a question can be answered by exploring the codebase, **explore the codebase instead of asking**.
 6. **Create the implementation plan** — informed by the interview: ordered, reviewable steps; files/components/metafields/settings to add or change; call out deviations from the TA and why.

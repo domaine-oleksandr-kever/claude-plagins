@@ -24,7 +24,8 @@ in its own subfolder under `plugins/`:
 │       ├── agents/               # subagents the skills delegate to
 │       │   ├── change-reviewer.md   #  reviews a diff (hygiene + conformance)
 │       │   ├── jira-reader.md       #  reads a ticket → structured fields
-│       │   └── figma-reader.md      #  reads one Figma frame → build spec
+│       │   ├── figma-reader.md      #  reads one Figma frame → build spec
+│       │   └── theme-explorer.md    #  scouts the theme → impact map
 │       └── references/           # shared docs the skills read
 │           ├── jira-custom-fields.md
 │           ├── review-flow.md    #  shared contract for the review/marker flow
@@ -205,7 +206,7 @@ Agents differ from skills: a **skill** runs inline in the main conversation and
 steers *your* Claude; an **agent** is a *separate* Claude you hand a task to,
 with its own context — ideal for parallel, sandboxed, or token-heavy subtasks.
 
-**Shipped agents.** This plugin ships three read-only subagents, all used to keep
+**Shipped agents.** This plugin ships four read-only subagents, all used to keep
 heavy/noisy work out of the main context:
 
 - **`change-reviewer`** — reviews a diff (stale comments, refactors, project-rules
@@ -214,8 +215,13 @@ heavy/noisy work out of the main context:
   structured fields (keeps raw ADF out of context).
 - **`figma-reader`** — reads **one** Figma frame via the Figma Dev Mode MCP and returns a
   compact build spec. Spawned **one per URL, in parallel** when a ticket has several.
+- **`theme-explorer`** — a planning scout: reads the project's `.claude/rules` + theme
+  layout and returns an impact map (relevant files, patterns, new files, rule constraints).
+  Finds breadth; the main loop reads the load-bearing files itself.
 
-The block above is roughly `change-reviewer`'s definition.
+In `develop-feature-or-fix` these run **in parallel** during Phase 1 (ticket + design +
+codebase reads at once) when the task scope is already clear. The block above is roughly
+`change-reviewer`'s definition.
 
 ## Review flow (pre-commit / commit / PR)
 
