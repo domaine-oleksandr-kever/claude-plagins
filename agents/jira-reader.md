@@ -34,6 +34,7 @@ summary:
 status:
 description:                # clean text/markdown
 acceptance_criteria:
+assumptions:
 technical_approach:
 steps_to_test:
 documentation_links:        # list

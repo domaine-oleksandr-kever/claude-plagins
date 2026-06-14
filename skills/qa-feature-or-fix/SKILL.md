@@ -33,14 +33,14 @@ Series position: Workflow 4 — runs after `develop-feature-or-fix`.
 ## Global rules
 
 - **Never proceed past the ✋ checkpoint** without explicit engineer confirmation.
-- **Atlassian MCP** for Jira; **Chrome DevTools MCP** for browser validation; **Figma MCP** when comparing to designs if URLs are available.
+- **Atlassian MCP** for Jira; **Chrome DevTools MCP** for browser validation; **Figma MCP** when comparing to designs if URLs are available. Ticket and design **reads are delegated to the `jira-reader` / `figma-reader` subagents** (raw payloads stay out of context).
 - Local preview should be running for interactive checks (see `${CLAUDE_PLUGIN_ROOT}/references/preflight-checklist.md` → Local dev server) — confirm with the engineer.
 
 ---
 
 ## Phase 1 — QA preparation `[plan mode]`
 
-1. **Ingest the ticket** — description, AC, Technical Approach, Steps to Test, links, environment notes. **Context-first:** if the conversation context already contains *all* of those fields in full (not summarized or truncated — e.g. from an earlier skill run or a pasted ticket), use that and **skip the Atlassian MCP fetch**; call MCP only for fields that are missing or partial. Otherwise, to locate those custom fields, follow `${CLAUDE_PLUGIN_ROOT}/references/jira-custom-fields.md` (verified field IDs + `expand: "names"` fallback + ADF parsing).
+1. **Ingest the ticket.** **Context-first:** if the conversation context already contains *all* of the fields this skill needs (Description, AC, Technical Approach, Steps to Test, environment notes) in full (not summarized or truncated — e.g. from an earlier skill run or a pasted ticket), use that and **skip the fetch**. Otherwise **delegate to the `jira-reader` subagent** (pass the ticket key/URL): it reads via Atlassian MCP, applies `${CLAUDE_PLUGIN_ROOT}/references/jira-custom-fields.md`, and returns the structured fields plus any `figma_urls`, keeping the raw ADF out of this context. If it returns `needs_clarification`, ask the engineer.
 2. **Analyse the implementation** — review the diff (branch/PR or local — ask which source); cross-check changes against the TA and each AC.
 3. **Generate the QA checklist** — rows for: each **acceptance criterion** → concrete test actions + expected results; **edge cases** from TA or code review; **accessibility** (keyboard, focus order, semantics, visible focus, contrast on critical UI); **performance** (layout shift, heavy images/scripts, critical rendering path if touched); **cross-browser / viewport** if layout-critical.
 
@@ -52,7 +52,7 @@ Present the checklist; let the engineer add/remove cases. Wait for approval befo
 
 ## Phase 2 — QA execution
 
-1. **Automated / assisted validation** — with Chrome DevTools MCP (when preview is available): visual pass vs Figma if linked, console errors, basic performance signals (LCP/CLS context as applicable). Record **Pass / Fail / Needs review** per item with short evidence (what you checked, what you saw).
+1. **Automated / assisted validation** — with Chrome DevTools MCP (when preview is available): visual pass vs Figma if linked (spawn one `figma-reader` per `figma_urls` entry, in parallel, to get the build spec to compare against), console errors, basic performance signals (LCP/CLS context as applicable). Record **Pass / Fail / Needs review** per item with short evidence (what you checked, what you saw).
 2. **Report findings** — summarize in a structured table or list; separate **blocking** vs **non-blocking**; suggest Jira updates (QA notes, screenshots, reopen criteria) but let the engineer own ticket edits unless they ask you to use Atlassian MCP.
 
 ## Quality bar

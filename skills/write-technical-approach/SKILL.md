@@ -42,7 +42,7 @@ Series position: Workflow 2 — runs after the ticket is validated and before `d
 
 - The engineer owns Git, merges, and ticket updates; you assist.
 - **Never proceed past a ✋ checkpoint** without explicit engineer confirmation.
-- Use **Atlassian MCP** to read (and optionally update) Jira.
+- Use **Atlassian MCP** for Jira: **reads are delegated to the `jira-reader` subagent**; the optional write-back (Phase 2) stays in the main loop.
 - Respect Foundation conventions: follow the repo's coding rules and **extend — never directly modify** `src/entry/core/*`.
 - **Client-facing repo.** Never reference tickets, repos, or Figma files from other client accounts.
 - **No internal repo file links** in the TA — they render as plain text in Jira. Reference in-repo files/rules with **inline code** only (`` `sections/main-header.liquid` ``). External links (Jira, Figma, public Shopify/Domaine docs) are fine.
@@ -55,7 +55,7 @@ Write for a **senior Shopify developer** who already knows the CLI, theme dev/de
 
 ## Phase 1 — Analysis & planning `[plan mode]`
 
-1. **Ingest the ticket** — fetch description, AC, attachments, links, labels, linked issues via Atlassian MCP. To locate the custom fields (Acceptance Criteria, Assumptions, Technical Approach, Documentation Links, Steps to test), follow `${CLAUDE_PLUGIN_ROOT}/references/jira-custom-fields.md` (verified field IDs + `expand: "names"` fallback + ADF parsing). **Context-first:** if the conversation context already contains *all* the fields this skill needs, in full (not summarized or truncated — e.g. from an earlier skill run or a pasted ticket), use that and **skip the Atlassian MCP fetch**; call MCP only for fields that are missing or partial.
+1. **Ingest the ticket.** **Context-first:** if the conversation context already contains *all* the fields this skill needs, in full (not summarized or truncated — e.g. from an earlier skill run or a pasted ticket), use that and **skip the fetch**. Otherwise **delegate to the `jira-reader` subagent** (pass the ticket key/URL): it reads via Atlassian MCP, applies `${CLAUDE_PLUGIN_ROOT}/references/jira-custom-fields.md`, and returns the structured fields — Description, AC, **Assumptions**, Technical Approach, Documentation Links, Steps to Test, `figma_urls` — keeping the raw ADF out of this context. If it returns `needs_clarification`, ask the engineer.
 2. **Validate readiness** — confirm Description and AC exist and are sufficient. If missing or ambiguous, **stop**, summarize gaps, ask how to proceed.
 3. **Analyse the codebase** — inspect relevant areas for patterns, layout, dependencies, constraints. Apply the repo's coding rules (Liquid, blocks, Tailwind, a11y, etc.).
 4. **Clarify ambiguities** — ask concise scope/edge-case/environment questions before drafting.

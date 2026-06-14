@@ -32,7 +32,7 @@ Series position: Workflow 3 — runs after `write-technical-approach`, before `q
 ## Global rules
 
 - **Never proceed past a ✋ checkpoint** without explicit engineer confirmation.
-- **Atlassian MCP** for Jira; **Figma MCP** for design extraction; **Chrome DevTools MCP** for in-browser validation when the preview is running.
+- **Atlassian MCP** for Jira; **Figma MCP** for design extraction; **Chrome DevTools MCP** for in-browser validation when the preview is running. Ticket and design **reads are delegated to the `jira-reader` / `figma-reader` subagents** so raw ADF / node trees stay out of this context — see step 1 and step 4.
 - **Browser-MCP prerequisite:** the local dev server must be running (see `${CLAUDE_PLUGIN_ROOT}/references/preflight-checklist.md` → Local dev server). Confirm before validation.
 - Respect the repo's coding rules. **Extend — never directly modify** `src/entry/core/*` JS/TS; prefer extending or composing core Liquid blocks/snippets per project conventions.
 
@@ -40,10 +40,10 @@ Series position: Workflow 3 — runs after `write-technical-approach`, before `q
 
 ## Phase 1 — Analysis & planning `[plan mode]`
 
-1. **Ingest the Jira ticket** via Atlassian MCP. **Context-first:** if the conversation context already contains *all* required fields (Description, AC, Technical Approach, Figma URL) in full — not summarized or truncated, e.g. from an earlier skill run or a pasted ticket — use that and **skip the Atlassian MCP fetch**; call MCP only for fields that are missing or partial. To locate the fields (Description, AC, Assumptions, Technical Approach, Documentation Links, Steps to test), follow `${CLAUDE_PLUGIN_ROOT}/references/jira-custom-fields.md` (verified field IDs + `expand: "names"` fallback + ADF parsing). If a required field returns `null` after discovery, it is genuinely empty — warn the engineer.
+1. **Ingest the Jira ticket.** **Context-first:** if the conversation context already contains *all* required fields (Description, AC, Technical Approach, Figma URL) in full — not summarized or truncated, e.g. from an earlier skill run or a pasted ticket — use that and **skip the fetch**. Otherwise **delegate to the `jira-reader` subagent** (pass the ticket key/URL): it reads via Atlassian MCP, applies `${CLAUDE_PLUGIN_ROOT}/references/jira-custom-fields.md`, and returns the structured fields plus any `figma_urls`, keeping the raw ADF out of this context. If it returns `needs_clarification`, ask the engineer. A field it reports empty is genuinely empty — warn the engineer.
 2. **Validate readiness** — if any are missing, **stop** and warn: Description, Acceptance Criteria, Technical Approach, Figma URL pointing to a **specific node**.
 3. **Analyse the codebase** — map current implementation to the TA + AC; note files to change, new files, schema/locale impacts, manual checks.
-4. **Analyse Figma** — load the file/node via Figma MCP. If the URL has no node id or scope is unclear, **ask** for the correct link.
+4. **Analyse Figma** — for each Figma URL on the ticket (from the `jira-reader` output or the engineer), **spawn one `figma-reader` subagent per URL, in parallel**; each returns a compact build spec. These can run in parallel with the codebase analysis (step 3). If a URL has no node id or the target frame is unclear (a `figma-reader` returns `needs_clarification`), **ask** for the correct link.
 5. **Interview the engineer until you reach shared understanding** — walk down each branch of the design tree, resolving dependencies between decisions one-by-one. **Ask questions one at a time**, and **for each, give your recommended answer**. If a question can be answered by exploring the codebase, **explore the codebase instead of asking**.
 6. **Create the implementation plan** — informed by the interview: ordered, reviewable steps; files/components/metafields/settings to add or change; call out deviations from the TA and why.
 
@@ -55,7 +55,7 @@ Present the **implementation plan** and wait for **explicit approval** before wr
 
 ## Phase 2 — Implementation
 
-1. **Implement** step by step after confirmation — reference Figma via MCP while building; follow the TA, AC, Foundation rules, Liquid/block patterns, Tailwind/token usage. Pause at logical milestones for review if the change is large or risky. **`git add` every newly created file immediately after creating it** (snippet, section, `src/entry/*`, locale, doc) so nothing referenced by the code is left untracked.
+1. **Implement** step by step after confirmation — build from the `figma-reader` specs gathered in Phase 1 (re-query Figma MCP only for detail they didn't capture); follow the TA, AC, Foundation rules, Liquid/block patterns, Tailwind/token usage. Pause at logical milestones for review if the change is large or risky. **`git add` every newly created file immediately after creating it** (snippet, section, `src/entry/*`, locale, doc) so nothing referenced by the code is left untracked.
 2. **In-browser validation** — use Chrome DevTools MCP to verify UI against design and AC (layout, breakpoints, console errors). If the dev server isn't running, say what to start and retry when ready.
 3. **Iterative review** — accept course corrections; don't argue past scope — surface tradeoffs instead.
 

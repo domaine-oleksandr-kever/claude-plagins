@@ -32,7 +32,7 @@ Series position: Workflow 5 — for QA handoff, typically alongside / after `qa-
 
 ## Global rules
 
-- Use **Atlassian MCP** to read the ticket (AC, TA, links, attachments).
+- Read the ticket via the **`jira-reader` subagent** (Atlassian MCP) — AC, TA, links, attachments; the optional write-back (Phase 2) stays in the main loop.
 - **Never proceed past the ✋ checkpoint** without explicit engineer confirmation.
 - Steps must be usable by someone **unfamiliar** with the implementation (clear navigation, theme/preview context, expectations).
 
@@ -40,7 +40,7 @@ Series position: Workflow 5 — for QA handoff, typically alongside / after `qa-
 
 ## Phase 1 — Analysis `[plan mode]`
 
-1. **Ingest the ticket** — description, AC, Technical Approach, Figma links, related bugs, environment notes. **Context-first:** if the conversation context already contains *all* of those fields in full (not summarized or truncated — e.g. from an earlier skill run or a pasted ticket), use that and **skip the Atlassian MCP fetch**; call MCP only for fields that are missing or partial. Otherwise, to locate those custom fields, follow `${CLAUDE_PLUGIN_ROOT}/references/jira-custom-fields.md` (verified field IDs + `expand: "names"` fallback + ADF parsing).
+1. **Ingest the ticket.** **Context-first:** if the conversation context already contains *all* of the fields this skill needs (Description, AC, Technical Approach, Steps to Test, Figma links, environment notes) in full (not summarized or truncated — e.g. from an earlier skill run or a pasted ticket), use that and **skip the fetch**. Otherwise **delegate to the `jira-reader` subagent** (pass the ticket key/URL): it reads via Atlassian MCP, applies `${CLAUDE_PLUGIN_ROOT}/references/jira-custom-fields.md`, and returns the structured fields plus any `figma_urls`, keeping the raw ADF out of this context. If it returns `needs_clarification`, ask the engineer.
 2. **Analyse the implementation** — from the diff or engineer summary: what shipped, which settings/metafields/templates matter, and merchant-visible paths (Online Store editor, templates, URLs).
 3. **Identify test scenarios** — map each AC to one or more scenarios; include edge cases, negative paths, and data/setup prerequisites (collections, tags, markets, customer state, inventory, etc.).
 
