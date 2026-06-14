@@ -10,8 +10,6 @@
   },
   "license": "MIT",
   "keywords": ["shopify", "foundation", "domaine", "skills"],
-  "agents": ["./agents/"],
-  "skills": "./skills/",
   "mcpServers": {
     "chrome-devtools-mcp": {
       "command": "npx",
