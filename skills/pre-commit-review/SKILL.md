@@ -9,6 +9,19 @@ Hygiene pass over the changed files **before a commit**. Four checks → a writt
 plan → developer approves/corrects → apply. **Never commits** (repo rule: never
 `git commit` without explicit per-commit permission — see `feedback_never_commit_without_permission`).
 
+## 0. Review-flow gate
+
+This skill is the primary home of the fnd review flow. Follow the shared contract in
+`${CLAUDE_PLUGIN_ROOT}/references/review-flow.md`:
+
+- Compute `branch` / `base` / `diff_hash` and read `.git/.fnd-review`.
+- **First review on this branch** (`reviewed_before == no`) → run the full pass below.
+- **Already reviewed on this branch** (`reviewed_before == yes`) → **ask** the developer
+  `[ full re-review ] / [ only the changed files ] / [ skip ]`, enriched with what changed
+  since the last review (recommend *skip* if `diff_hash` is unchanged). Honour their choice.
+
+After the pass is applied (step 4), **write/refresh the marker**.
+
 ## 1. Determine scope
 
 Diff the branch against **`develop` if it exists, else `main`**:
@@ -21,6 +34,18 @@ git diff --name-only "$base"...HEAD
 Review **only these files**. Read each one (the diff + enough surrounding code to judge comments).
 
 ## 2. Run the four checks
+
+**How the work is split** (per `review-flow.md` — don't read the same files twice):
+
+- **B and D run inline here** — they're mechanical (`git diff | grep`, `git status`), no
+  agent needed.
+- **A and C are delegated to the `change-reviewer` agent** (`hygiene` emphasis) so the
+  heavy file-reading stays out of the main context. Small diff → one agent; large diff
+  (≳ 15 files) → one `change-reviewer` per file-group, **in parallel**. Pass each agent its
+  file group, the `base`, and the raw B-hits to confirm. Merge its findings table with the
+  inline B/D hits into the step-3 plan.
+
+The four checks, for reference (full definitions also live in the agent):
 
 For every changed file, inspect each comment — Liquid (`{% comment %}`, `{%- comment -%}`,
 `{% doc %}`), JS/TS (`//`, `/* */`, JSDoc `/** */`), CSS (`/* */`):
@@ -71,6 +96,17 @@ After the developer approves (with their corrections), make exactly the agreed e
 more. For approved check-D rows, run the agreed `git add <path>` so the referenced files are
 tracked. Then **stop**: report what changed and hand the commit back to the developer (for
 `/commit` here: stage files + `pbcopy` the message; never run `git commit`).
+
+**Write the marker.** After the edits are applied, record the review for this branch so
+`commit` / `create-pull-request` don't redundantly re-review (recompute `diff_hash` so it
+reflects the post-edit state — see `${CLAUDE_PLUGIN_ROOT}/references/review-flow.md` §1):
+
+```bash
+branch=$(git rev-parse --abbrev-ref HEAD)
+diff_hash=$( { git diff "$base"...HEAD; git diff; } | git hash-object --stdin )
+{ echo "branch=$branch"; echo "base=$base"; echo "diff_hash=$diff_hash"; \
+  echo "reviewed_at_head=$(git rev-parse HEAD)"; } > .git/.fnd-review
+```
 
 ## Guardrails
 

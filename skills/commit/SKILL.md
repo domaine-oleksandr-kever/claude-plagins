@@ -54,6 +54,17 @@ Skip the body only for genuinely trivial changes (typo, formatting, dependency b
 | `ci` | CI config |
 | `chore` | tooling, housekeeping |
 
+## Review gate (before committing)
+
+Consult the fnd review flow (`${CLAUDE_PLUGIN_ROOT}/references/review-flow.md`). `commit`
+does **not** run the hygiene review itself — it only ensures one happened:
+
+- Read `.git/.fnd-review`. **No marker for this branch** → offer to run
+  `/fnd:pre-commit-review` first; proceed if the developer declines.
+- **Marker exists** → continue; don't re-run a review unprompted.
+
+(Your own untracked-file check in step 2 still runs regardless.)
+
 ## Workflow
 
 1. Run `git status` and `git diff --staged` (and `git diff` for unstaged) to see what's being committed.

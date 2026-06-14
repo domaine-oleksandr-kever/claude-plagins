@@ -10,5 +10,6 @@
   },
   "license": "MIT",
   "keywords": ["shopify", "foundation", "domaine", "skills"],
+  "agents": ["./agents/"],
   "skills": "./skills/"
 }

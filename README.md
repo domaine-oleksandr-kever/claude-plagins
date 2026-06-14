@@ -16,9 +16,12 @@ theme work.
 │   ├── develop-feature-or-fix/SKILL.md
 │   ├── write-technical-approach/SKILL.md
 │   └── ...
+├── agents/                  # subagents the skills delegate to
+│   └── change-reviewer.md
 ├── references/              # Shared docs the skills read
 │   ├── jira-custom-fields.md
 │   ├── technical-approach-format.md
+│   ├── review-flow.md       # shared contract for the review/marker flow
 │   └── ...
 ├── LICENSE
 └── README.md
@@ -193,9 +196,28 @@ Agents differ from skills: a **skill** runs inline in the main conversation and
 steers *your* Claude; an **agent** is a *separate* Claude you hand a task to,
 with its own context — ideal for parallel, sandboxed, or token-heavy subtasks.
 
-This plugin ships no agents yet — the block above is a ready-to-use template, and
-wiring `change-reviewer` into the review flow is the next planned step
-(see `AGENTS_PLAN.md`).
+**Shipped agent — `change-reviewer`.** This plugin ships one agent
+(`agents/change-reviewer.md`). The review flow (see below) delegates the heavy,
+file-reading checks to it so the main context stays clean, and fans it out one
+agent per file-group on large diffs. The block above is roughly its definition.
+
+## Review flow (pre-commit / commit / PR)
+
+`pre-commit-review`, `commit`, and `create-pull-request` share one review contract
+(`references/review-flow.md`):
+
+- **Split by files, not checks.** Mechanical checks (Jira task numbers, untracked
+  referenced files) run inline; the judgement checks (stale comments, refactors,
+  project-rules conformance) go to the `change-reviewer` agent — one for a small
+  diff, one per file-group in parallel for a large one. Each file is read once.
+- **Once per branch.** A tiny branch-keyed marker at `.git/.fnd-review` (never
+  committed, auto-overwritten) records that a branch was reviewed. The **first**
+  review on a branch runs in full; **later** runs ask the developer
+  `[ full / only changed files / skip ]`, so `commit` and PR creation don't
+  redundantly re-review work that's already been checked.
+- **PR conformance gate.** `create-pull-request` runs the agent with a
+  conformance emphasis; a `protected-core` violation (a direct edit to Foundation
+  core) is a **blocker** that stops the PR until resolved.
 
 ## License
 
