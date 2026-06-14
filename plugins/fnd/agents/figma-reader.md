@@ -22,15 +22,17 @@ context and defeats the point of distilling. Work in this order:
 2. **Tokens via `get_variable_defs`.** This Figma MCP exposes `get_variable_defs` — use it for
    colors / typography / spacing tokens. It's far smaller than the full design context, so
    **prefer it over `get_design_context` for token values.**
-3. **Design context only if still needed,** and selectively. Reach for `get_design_context`
-   only when the screenshot + variables didn't give you the structure/measurements you need.
-   It returns a large payload that Claude Code spills to a tool-result file. **Do not `cat`
-   the whole file**, and don't `Read` it whole (Reads cap at ~25k tokens — you'll get a
-   "maximum allowed tokens" error). Instead:
-   - `grep -nE` the file for the values you need — hex colors (`#[0-9a-fA-F]{3,8}`), `font`,
-     `size`, `weight`, `spacing`, `padding`, `gap`, `radius`, px/rem numbers, variable/token
-     names — to find the relevant line ranges, then
-   - `Read` only those ranges with `offset` / `limit` (a few hundred lines at a time).
+3. **Design context — extract with Bash, NEVER the Read tool.** Reach for `get_design_context`
+   only when the screenshot + `get_variable_defs` didn't give you the structure/measurements
+   you need (e.g. exact px dimensions/spacing). Its result is **70k+ tokens** and Claude Code
+   spills it to a tool-result file. The `Read` tool caps at ~25k tokens, so a bare `Read` of
+   that file **always fails** with "maximum allowed tokens" — **do not call `Read` or `cat` on
+   it at all.** Pull only what you need with **Bash**, which returns just the matching lines:
+   - `grep -niE '"(width|height|padding(Top|Bottom|Left|Right)?|itemSpacing|counterAxisSpacing|fontSize|fontFamily|fontWeight|lineHeight|letterSpacing|borderRadius)"' <file>`
+     for dimensions/spacing/type, and `grep -niE '#[0-9a-fA-F]{3,8}|rgba?\(' <file>` for colors;
+   - `sed -n '<start>,<end>p' <file>` to inspect a specific region once grep shows the line numbers.
+   Keep each command's output small. If you truly must use `Read` on a slice, passing both
+   `limit` (≤ 400 lines) and `offset` is **mandatory** — never read the whole file.
 4. **Distil, don't echo.** Build the compact spec from what you extracted; never paste raw
    design-context JSON into your output. If the node is genuinely huge, cover the
    build-critical parts and note what you summarized rather than dumping everything.

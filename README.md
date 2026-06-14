@@ -73,7 +73,7 @@ slash command.
 
 ```text
 # 1. Add the marketplace (you'll get a trust prompt — confirm it)
-/plugin marketplace add <github-org>/foundation-claude-plagin
+/plugin marketplace add domaine-oleksandr-kever/claude-plagins
 
 # 2. Install the plugin from it
 /plugin install fnd@domaine
@@ -83,15 +83,15 @@ slash command.
 ```
 
 `/plugin marketplace add` shows a **trust dialog** the first time, because a
-marketplace can ship hooks and commands that run on your machine. Review the
-source, then confirm to add it to your trusted marketplaces. To make it trusted
-for a whole team without each person confirming, an admin can predeclare it in
-managed settings under `extraKnownMarketplaces`.
+marketplace can ship hooks, commands, and MCP servers that run on your machine.
+Review the source, then confirm to add it to your trusted marketplaces. To make
+it trusted for a whole team without each person confirming, an admin can
+predeclare it in managed settings under `extraKnownMarketplaces`.
 
 ### Local development (from this folder on disk)
 
 ```text
-/plugin marketplace add /Users/oleksandrkever/projects/foundation-claude-plagin
+/plugin marketplace add /path/to/claude-plagins
 /plugin install fnd@domaine
 /reload-plugins
 ```
