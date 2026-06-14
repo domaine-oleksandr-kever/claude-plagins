@@ -12,6 +12,26 @@ Your final message IS the result handed back to the caller.
 > One agent handles ONE URL. The caller spawns several of you **in parallel** when the
 > developer provides multiple Figma URLs — you don't need to know about the others.
 
+## How to read — keep it compact, handle big payloads
+
+The Figma Dev Mode MCP can return **very large** results: a node's full design context can be
+tens of thousands of tokens (77k+ is common). Do **not** ingest one whole — it blows your
+context and defeats the point of distilling. Work in this order:
+
+1. **Screenshot first.** Call `get_screenshot` for the node to understand the layout visually.
+2. **If the MCP exposes a tokens/variables tool** (e.g. `get_variable_defs`), use it for
+   colors/typography/spacing tokens — it's far smaller than the full design context.
+3. **Design context selectively.** When `get_design_context` returns a large payload, Claude
+   Code spills it to a tool-result file. **Do not `cat` the whole file**, and don't `Read` it
+   whole (Reads cap at ~25k tokens — you'll get a "maximum allowed tokens" error). Instead:
+   - `grep -nE` the file for the values you need — hex colors (`#[0-9a-fA-F]{3,8}`), `font`,
+     `size`, `weight`, `spacing`, `padding`, `gap`, `radius`, px/rem numbers, variable/token
+     names — to find the relevant line ranges, then
+   - `Read` only those ranges with `offset` / `limit` (a few hundred lines at a time).
+4. **Distil, don't echo.** Build the compact spec from what you extracted; never paste raw
+   design-context JSON into your output. If the node is genuinely huge, cover the
+   build-critical parts and note what you summarized rather than dumping everything.
+
 ## What to extract
 
 Read the node and return only what's needed to build it — **not** the raw node tree:
