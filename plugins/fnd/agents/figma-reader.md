@@ -19,11 +19,14 @@ tens of thousands of tokens (77k+ is common). Do **not** ingest one whole — it
 context and defeats the point of distilling. Work in this order:
 
 1. **Screenshot first.** Call `get_screenshot` for the node to understand the layout visually.
-2. **If the MCP exposes a tokens/variables tool** (e.g. `get_variable_defs`), use it for
-   colors/typography/spacing tokens — it's far smaller than the full design context.
-3. **Design context selectively.** When `get_design_context` returns a large payload, Claude
-   Code spills it to a tool-result file. **Do not `cat` the whole file**, and don't `Read` it
-   whole (Reads cap at ~25k tokens — you'll get a "maximum allowed tokens" error). Instead:
+2. **Tokens via `get_variable_defs`.** This Figma MCP exposes `get_variable_defs` — use it for
+   colors / typography / spacing tokens. It's far smaller than the full design context, so
+   **prefer it over `get_design_context` for token values.**
+3. **Design context only if still needed,** and selectively. Reach for `get_design_context`
+   only when the screenshot + variables didn't give you the structure/measurements you need.
+   It returns a large payload that Claude Code spills to a tool-result file. **Do not `cat`
+   the whole file**, and don't `Read` it whole (Reads cap at ~25k tokens — you'll get a
+   "maximum allowed tokens" error). Instead:
    - `grep -nE` the file for the values you need — hex colors (`#[0-9a-fA-F]{3,8}`), `font`,
      `size`, `weight`, `spacing`, `padding`, `gap`, `radius`, px/rem numbers, variable/token
      names — to find the relevant line ranges, then
