@@ -17,7 +17,9 @@ theme work.
 │   ├── write-technical-approach/SKILL.md
 │   └── ...
 ├── agents/                  # subagents the skills delegate to
-│   └── change-reviewer.md
+│   ├── change-reviewer.md   #   reviews a diff (hygiene + conformance)
+│   ├── jira-reader.md       #   reads a ticket → structured fields
+│   └── figma-reader.md      #   reads one Figma frame → build spec
 ├── references/              # Shared docs the skills read
 │   ├── jira-custom-fields.md
 │   ├── technical-approach-format.md
@@ -196,10 +198,17 @@ Agents differ from skills: a **skill** runs inline in the main conversation and
 steers *your* Claude; an **agent** is a *separate* Claude you hand a task to,
 with its own context — ideal for parallel, sandboxed, or token-heavy subtasks.
 
-**Shipped agent — `change-reviewer`.** This plugin ships one agent
-(`agents/change-reviewer.md`). The review flow (see below) delegates the heavy,
-file-reading checks to it so the main context stays clean, and fans it out one
-agent per file-group on large diffs. The block above is roughly its definition.
+**Shipped agents.** This plugin ships three read-only subagents, all used to keep
+heavy/noisy work out of the main context:
+
+- **`change-reviewer`** — reviews a diff (stale comments, refactors, project-rules
+  conformance). The review flow fans it out one agent per file-group on large diffs.
+- **`jira-reader`** — fetches a Jira ticket via the Atlassian MCP and returns clean
+  structured fields (keeps raw ADF out of context).
+- **`figma-reader`** — reads **one** Figma frame via the Figma Dev Mode MCP and returns a
+  compact build spec. Spawned **one per URL, in parallel** when a ticket has several.
+
+The block above is roughly `change-reviewer`'s definition.
 
 ## Review flow (pre-commit / commit / PR)
 
@@ -218,6 +227,25 @@ agent per file-group on large diffs. The block above is roughly its definition.
 - **PR conformance gate.** `create-pull-request` runs the agent with a
   conformance emphasis; a `protected-core` violation (a direct edit to Foundation
   core) is a **blocker** that stops the PR until resolved.
+
+## Bundled MCP servers
+
+The plugin declares the MCP servers the skills/agents use (`plugin.json` →
+`mcpServers`): `atlassian` (Jira), `figma-dev-mode`, `shopify-dev-mcp`,
+`chrome-devtools-mcp`, `playwright`, `notion-mcp`.
+
+- **Install the plugin at user (global) scope** and these servers are available in
+  **every** project — you don't need a `.mcp.json` in each repo.
+- **Authentication is per-user and cached** (keychain): authenticate Atlassian / Notion
+  **once** via `/mcp`; it persists across projects and sessions — no re-auth when you
+  switch repos.
+- `figma-dev-mode` is the local Dev Mode SSE server — it works whenever the Figma desktop
+  app is open in Dev Mode (no auth).
+- If you already have any of these configured at user/project scope, that scope wins; the
+  plugin's declaration is harmlessly ignored.
+
+> OAuth servers need a browser sign-in, so they're unavailable in headless/non-interactive
+> runs.
 
 ## License
 

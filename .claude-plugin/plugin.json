@@ -11,5 +11,32 @@
   "license": "MIT",
   "keywords": ["shopify", "foundation", "domaine", "skills"],
   "agents": ["./agents/"],
-  "skills": "./skills/"
+  "skills": "./skills/",
+  "mcpServers": {
+    "chrome-devtools-mcp": {
+      "command": "npx",
+      "args": ["-y", "chrome-devtools-mcp@latest", "--isolated"]
+    },
+    "atlassian": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://mcp.atlassian.com/v1/mcp"]
+    },
+    "shopify-dev-mcp": {
+      "command": "npx",
+      "args": ["-y", "@shopify/dev-mcp@latest"],
+      "env": { "LIQUID": "true" }
+    },
+    "figma-dev-mode": {
+      "type": "sse",
+      "url": "http://127.0.0.1:3845/sse"
+    },
+    "playwright": {
+      "command": "npx",
+      "args": ["@playwright/mcp@latest"]
+    },
+    "notion-mcp": {
+      "type": "http",
+      "url": "https://mcp.notion.com/mcp"
+    }
+  }
 }
