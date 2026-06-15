@@ -14,12 +14,14 @@ arguments:
   - name: target_branch
     description: Merge base. Defaults to Domaine Git Flow (usually `develop`, sometimes `main`); confirm if not obvious.
   - name: theme_name
-    description: Preview theme name (optional). Omitted from the PR body if not provided.
+    description: Preview theme name (optional). If omitted, the skill can create the preview theme for you (see step 5). Omitted from the PR body if neither provided nor created.
   - name: theme_url
-    description: Public theme preview URL / THEME_URL (optional). Used to build the Preview row + extract theme ID.
+    description: Public theme preview URL / THEME_URL (optional). Used to build the Preview row + extract theme ID. Auto-filled when the skill creates the preview theme.
   - name: theme_admin_url
-    description: Shopify admin theme URL / THEME_ADMIN_URL (optional).
-allowed-tools: Read, Glob, Grep, Bash(git status), Bash(git fetch*), Bash(git log*), Bash(git diff*), Bash(git remote*), Bash(gh pr create*)
+    description: Shopify admin theme URL / THEME_ADMIN_URL (optional). Auto-filled when the skill creates the preview theme.
+  - name: preview_path
+    description: Storefront path the change should be reviewed on (e.g. /products/group-lipglass). Used to deep-link the Preview + Admin (template) rows. Infer from context; ask if unsure.
+allowed-tools: Read, Glob, Grep, Bash(git status), Bash(git fetch*), Bash(git log*), Bash(git diff*), Bash(git remote*), Bash(gh pr create*), Bash(${CLAUDE_PLUGIN_ROOT}/skills/create-pull-request/scripts/create-preview-theme.sh*)
 ---
 
 # Create PR (GitHub + Jira)
@@ -56,7 +58,15 @@ Series position: Workflow 6 — the final step, after `develop-feature-or-fix` a
 
    **Conformance review** (fnd review flow — `${CLAUDE_PLUGIN_ROOT}/references/review-flow.md`). Run the flow with **`conformance`** emphasis: read `.git/.fnd-review`; **first review on this branch** → spawn `change-reviewer` over the diff (small → one agent; large → one per file-group, in parallel) and surface its findings table; **already reviewed** → ask the developer `[ full re-review ] / [ only changed files ] / [ skip ]`. **Any `protected-core` blocker stops the PR** until it's resolved or the developer explicitly waives it. Refresh `.git/.fnd-review` after reviewing.
 3. **PR metadata** — propose a title `[ELC-XX][Type] Short description` (Type = `Feature` | `Fix` | `Refactor` | `Chore` | `Docs` | `Style` | `Perf` | `Test`). Confirm the target branch. Capture linked tickets / blocks / related PRs.
-4. **Draft the PR description** — build all body sections and the conditional theme-preview table per **`create-pull-request/REFERENCE.md`**.
+4. **Preview theme** — populate the theme-preview table. See **`create-pull-request/REFERENCE.md` → Preview theme**. In short:
+   - If `theme_name` / `theme_url` / `theme_admin_url` were already supplied as arguments, use them as-is (skip creation).
+   - Otherwise run `info`: `${CLAUDE_PLUGIN_ROOT}/skills/create-pull-request/scripts/create-preview-theme.sh info`.
+     - **Any `error=` line (e.g. no `shopify.theme.toml`, no CLI/jq)** → fall back to the **manual** path: ask the developer for the theme name + Preview / Admin URLs, and build the table from those.
+     - **Success** → show the detected dev theme name, propose the new name (replace the `[DEV]`/role prefix with `[ELC-XX]` — e.g. `[DEV] Kever | Domaine` → `[ELC-126] Kever | Domaine`), and **ask: create the preview theme now? `[ yes / no ]`**.
+       - **No** → manual path (ask for name + Preview/Admin URLs).
+       - **Yes** → run `create --name "<proposed name>"` (add `--reuse` to refresh an existing same-named theme instead of creating a duplicate). **Never read `shopify.theme.toml` yourself** — the token lives there; the script consumes it without exposing it, and prints `preview_url` / `editor_url` back. Then build the page-aware links (next).
+   - **Page deep-links** — if a storefront path is known (`preview_path`, or inferable from context — e.g. you tested on `/products/group-lipglass`), append it: Preview → `…/<path>?preview_theme_id=<id>`; Admin → editor link to that template (`…/editor?previewPath=<url-encoded path>`, or `?template=<name>` if the developer names the template). If the path/template is missing or you're unsure, **ask the developer** — don't guess.
+5. **Draft the PR description** — build all body sections and the conditional theme-preview table per **`create-pull-request/REFERENCE.md`**.
 
 ### ✋ Checkpoint — Phase 1
 
