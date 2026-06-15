@@ -50,11 +50,13 @@ SETTINGS_PATTERNS=(
   "sections/*.json"
 )
 
-# Canonical Shopify theme directories. We push ONLY these (a whitelist), so non-theme
-# paths in the repo (multi-brand build sources, tmp/ artifacts, metaobjects-def.json,
-# src/, schemas/, node_modules/, …) are never sent — regardless of the repo's
-# .shopifyignore. Without this, `theme push --path .` scans them and the CLI crashes
-# parsing the API's rejection of an invalid asset.
+# Canonical Shopify theme directories. We assemble ONLY these into a clean temp dir and
+# push that (never `--path .`), so non-theme paths in the repo (multi-brand build sources,
+# tmp/ artifacts, metaobjects-def.json, src/, schemas/, node_modules/, …) are physically
+# absent from the push root. This is stricter than `--only` globs: Shopify's matcher is
+# loose (e.g. `--only "snippets/**"` also re-captures nested multi-brand/**/snippets/*),
+# so a whitelist glob leaks; a clean directory cannot. Repo-agnostic, no .shopifyignore
+# dependency. Without this the CLI crashes parsing the API's rejection of an invalid asset.
 THEME_DIRS=( assets blocks config layout locales sections snippets templates )
 
 fail() { printf 'error=%s\n' "$1"; exit 1; }
@@ -86,9 +88,25 @@ export SHOPIFY_CLI_THEME_TOKEN="$TOKEN"   # consumed by `shopify`; never echoed
 # Build flag arrays portably (bash 3.2 on macOS has no mapfile).
 IGN=(); for p in "${SETTINGS_PATTERNS[@]}"; do IGN+=(--ignore "$p"); done   # settings to skip on code push
 ONLY=(); for p in "${SETTINGS_PATTERNS[@]}"; do ONLY+=(--only "$p"); done   # settings-only, for the overlay
-# Restrict code pushes to real theme dirs (flat + nested). Composes with --ignore.
-ONLY_THEME=(); for d in "${THEME_DIRS[@]}"; do ONLY_THEME+=(--only "$d/*" --only "$d/**"); done
 EXTRA_IGN=()   # extra --ignore patterns passed through from the CLI (--ignore-extra)
+
+# Temp dirs to clean up on exit (registered as they're created).
+CLEAN_DIRS=()
+cleanup() { for d in ${CLEAN_DIRS[@]+"${CLEAN_DIRS[@]}"}; do rm -rf "$d"; done; }
+trap cleanup EXIT
+
+# Assemble a clean push root containing only the canonical theme dirs (post-build).
+# Uses APFS clonefile (cp -Rc, instant/zero-copy) with a plain-copy fallback. Echoes the
+# temp path; the caller registers it for cleanup. The repo's .shopifyignore is carried
+# along so any intentional excludes still apply.
+assemble_theme() {
+  local dest d; dest="$(mktemp -d)"
+  for d in "${THEME_DIRS[@]}"; do
+    if [ -e "$d" ]; then cp -Rc "$d" "$dest/" 2>/dev/null || cp -R "$d" "$dest/"; fi
+  done
+  if [ -f .shopifyignore ]; then cp .shopifyignore "$dest/" 2>/dev/null || true; fi
+  printf '%s' "$dest"
+}
 
 theme_name_by_id() {
   shopify theme list --store "$STORE" --json 2>/dev/null \
@@ -151,6 +169,7 @@ case "$MODE" in
     [ -n "$NAME" ] || fail "create requires --name \"<new theme name>\""
 
     run_build
+    TMP_CODE="$(assemble_theme)"; CLEAN_DIRS+=("$TMP_CODE")
 
     # 1) push the built local code (settings ignored) to a new/existing theme.
     EXISTING=""; REUSED=false
@@ -159,11 +178,11 @@ case "$MODE" in
     ERR="$(mktemp)"
     # ${EXTRA_IGN[@]+"${EXTRA_IGN[@]}"} expands to nothing when empty (bash-3.2 set -u safe).
     if [ -n "$EXISTING" ]; then
-      OUT="$(shopify theme push --store "$STORE" --theme "$EXISTING" --path . "${ONLY_THEME[@]}" "${IGN[@]}" ${EXTRA_IGN[@]+"${EXTRA_IGN[@]}"} --json 2>"$ERR")" \
+      OUT="$(shopify theme push --store "$STORE" --theme "$EXISTING" --path "$TMP_CODE" "${IGN[@]}" ${EXTRA_IGN[@]+"${EXTRA_IGN[@]}"} --json 2>"$ERR")" \
         || push_fail push_code_failed_reuse
       REUSED=true
     else
-      if ! OUT="$(shopify theme push --store "$STORE" --unpublished --theme "$NAME" --path . "${ONLY_THEME[@]}" "${IGN[@]}" ${EXTRA_IGN[@]+"${EXTRA_IGN[@]}"} --json 2>"$ERR")"; then
+      if ! OUT="$(shopify theme push --store "$STORE" --unpublished --theme "$NAME" --path "$TMP_CODE" "${IGN[@]}" ${EXTRA_IGN[@]+"${EXTRA_IGN[@]}"} --json 2>"$ERR")"; then
         grep -qiE 'limit|maximum|too many' "$ERR" \
           && { rm -f "$ERR"; fail "theme_limit — store is at its theme cap (20 non-Plus / 100 Plus). Delete an old theme or re-run with --reuse."; }
         push_fail push_code_failed
@@ -177,10 +196,10 @@ case "$MODE" in
     [ -n "$THEME_ID" ] || fail "code push succeeded but could not parse theme id from --json"
 
     # 2) overlay the dev theme's customizer settings onto the new theme.
-    TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
-    shopify theme pull --store "$STORE" --theme "$DEV_THEME_ID" --path "$TMP" "${ONLY[@]}" --nodelete >/dev/null 2>&1 \
+    TMP_SET="$(mktemp -d)"; CLEAN_DIRS+=("$TMP_SET")
+    shopify theme pull --store "$STORE" --theme "$DEV_THEME_ID" --path "$TMP_SET" "${ONLY[@]}" --nodelete >/dev/null 2>&1 \
       || fail "pull of dev-theme settings failed (dev theme id $DEV_THEME_ID)"
-    shopify theme push --store "$STORE" --theme "$THEME_ID" --path "$TMP" --nodelete "${ONLY[@]}" >/dev/null 2>&1 \
+    shopify theme push --store "$STORE" --theme "$THEME_ID" --path "$TMP_SET" --nodelete "${ONLY[@]}" >/dev/null 2>&1 \
       || fail "overlay of dev-theme settings onto $THEME_ID failed"
 
     printf 'theme_id=%s\n' "$THEME_ID"
@@ -206,9 +225,10 @@ case "$MODE" in
     [ -n "$TARGET" ] || fail "refresh requires --theme <existing theme id>"
 
     run_build
+    TMP_CODE="$(assemble_theme)"; CLEAN_DIRS+=("$TMP_CODE")
 
     ERR="$(mktemp)"
-    if ! OUT="$(shopify theme push --store "$STORE" --theme "$TARGET" --path . "${ONLY_THEME[@]}" "${IGN[@]}" ${EXTRA_IGN[@]+"${EXTRA_IGN[@]}"} --json 2>"$ERR")"; then
+    if ! OUT="$(shopify theme push --store "$STORE" --theme "$TARGET" --path "$TMP_CODE" "${IGN[@]}" ${EXTRA_IGN[@]+"${EXTRA_IGN[@]}"} --json 2>"$ERR")"; then
       push_fail refresh_push_failed
     fi
     rm -f "$ERR"

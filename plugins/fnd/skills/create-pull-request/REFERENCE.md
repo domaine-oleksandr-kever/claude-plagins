@@ -49,14 +49,17 @@ skill pushes code only.
 > the dev theme's saved settings may not map cleanly onto the new code — some sections can render
 > with defaults. Inherent to any settings-overlay; flag it when the change is structural.
 
-Code pushes are **whitelisted to the canonical theme dirs** (`assets blocks config layout locales
-sections snippets templates`) via `--only`, so non-theme paths in the repo (multi-brand build
-sources, `tmp/` artifacts, root dev files, `src/`, `schemas/`, `node_modules/`) are never sent —
-even if the repo's `.shopifyignore` doesn't list them. Without this, `shopify theme push --path .`
-scans those files and the CLI crashes parsing the API's rejection of an invalid asset. For an
-unusual file living *inside* a theme dir that still shouldn't ship, pass `--ignore-extra "<glob>"`
-(both `create` and `refresh` accept it, repeatable). On a push failure the script prints the real
-cause plus a `log=<path>` to the full `shopify` stderr — read that, don't guess.
+Code pushes never use `--path .`. The script **assembles a clean push root** containing only the
+canonical theme dirs (`assets blocks config layout locales sections snippets templates`, via APFS
+clonefile so it's instant) and pushes that, so non-theme paths in the repo (multi-brand build
+sources, `tmp/` artifacts, root dev files, `src/`, `schemas/`, `node_modules/`) are physically
+absent from the push. This is stricter than a `--only` glob whitelist: Shopify's matcher is loose
+(`--only "snippets/**"` also re-captures nested `multi-brand/**/snippets/*`), so a glob leaks but a
+clean directory can't. Without it `shopify theme push --path .` scans those files and the CLI
+crashes parsing the API's rejection of an invalid asset. For an unusual file living *inside* a
+theme dir that still shouldn't ship, pass `--ignore-extra "<glob>"` (both `create` and `refresh`
+accept it, repeatable). On a push failure the script prints the real cause plus a `log=<path>` to
+the full `shopify` stderr — read that, don't guess.
 
 > **Security:** the access token lives in `shopify.theme.toml`. **Never `Read` that file** —
 > it would pull the token into context. The script consumes the token inside the `shopify`
