@@ -35,12 +35,19 @@ Populate these (adapt headings if a team template exists):
 
 ## Preview theme — auto-create or manual
 
-The Preview row needs an unpublished theme that carries the developer's configured
-customizer settings. A plain `theme push` of the branch would lose those settings, and the
-server-side `themeDuplicate` API is gated — so the skill reproduces a true duplicate via the
-CLI: **pull the configured dev theme → push it back as a new unpublished theme**. This is done
-by `scripts/create-preview-theme.sh`, which reads the store / dev-theme-id / Theme Access token
-from `shopify.theme.toml` (the **uncommented** `theme = "…"` line).
+The Preview row needs an unpublished theme that shows **this branch's code** with the developer's
+**configured customizer content**. So `scripts/create-preview-theme.sh` builds the local repo
+(`npm run build`) and pushes the built code, then overlays only the dev theme's settings —
+`config/settings_data.json`, `templates/**/*.json`, and section groups `sections/*.json`. It does
+**not** clone the dev theme's code (which may be stale or broken); code always comes from the
+branch. The script reads the store / dev-theme-id / Theme Access token from `shopify.theme.toml`
+(the **uncommented** `theme = "…"` line). To redeploy code into an existing preview theme later
+(e.g. after a fix) without disturbing its settings, the `refresh` mode / `update-preview-theme`
+skill pushes code only.
+
+> **Settings ↔ code drift:** if the branch changed a section/block schema (renamed settings, etc.),
+> the dev theme's saved settings may not map cleanly onto the new code — some sections can render
+> with defaults. Inherent to any settings-overlay; flag it when the change is structural.
 
 > **Security:** the access token lives in `shopify.theme.toml`. **Never `Read` that file** —
 > it would pull the token into context. The script consumes the token inside the `shopify`

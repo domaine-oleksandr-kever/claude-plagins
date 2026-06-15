@@ -1,35 +1,54 @@
 #!/usr/bin/env bash
 #
-# create-preview-theme.sh — duplicate the configured dev theme into a named,
-# unpublished PREVIEW theme for the fnd `create-pull-request` skill.
+# create-preview-theme.sh — build an unpublished Shopify PREVIEW theme for the fnd
+# `create-pull-request` / `create-preview-theme` skills.
 #
-# WHY a script (not a subagent): the flow is deterministic, and the Theme Access
-# token lives in shopify.theme.toml. This script reads the token straight into
-# the `shopify` subprocess env so it NEVER enters Claude's context, and it never
-# prints the token. The calling skill must NOT read shopify.theme.toml itself.
+# MODEL: a preview = YOUR branch's CODE (built locally) + the dev theme's CUSTOMIZER
+# SETTINGS. Code always comes from the local repo (so fixes in the branch show up);
+# only the customizer content is copied from the configured dev theme. This avoids
+# cloning stale/broken code that happens to live on the dev theme.
 #
-# It does a real server-side duplicate without admin API / themeDuplicate
-# (which is gated): pull the configured dev theme to a temp dir, then push it
-# back as a new unpublished theme — so all customizer settings are preserved.
+# "Settings" preserved from the dev theme (everything else is code, from the repo):
+#   - config/settings_data.json      (theme settings)
+#   - templates/**/*.json            (per-template section config)
+#   - sections/*.json                (section groups: header/footer/etc.)
+#
+# WHY a script (not a subagent): deterministic, and the Theme Access token lives in
+# shopify.theme.toml. This reads the token straight into the `shopify` subprocess so it
+# NEVER enters Claude's context and is never printed. The calling skill must NOT read
+# shopify.theme.toml itself.
 #
 # Config source (project root, or $TOML_PATH): shopify.theme.toml
 #   - dev theme id : the UNCOMMENTED `theme = "..."` line (commented variants ignored)
 #   - store        : the UNCOMMENTED `store = "..."` line
 #   - token        : `password = "..."`, else first shp*_… token in the file
 #
-# Usage:
-#   create-preview-theme.sh info
-#       → prints: store=… dev_theme_id=… dev_theme_name=…   (no mutation)
-#   create-preview-theme.sh create --name "<NEW THEME NAME>" [--reuse]
-#       → pull dev theme → push as unpublished (or reuse same-named theme)
-#       → prints: theme_id=… name=… store=… preview_url=… editor_url=… reused=true|false
+# Subcommands:
+#   info
+#       → store=… dev_theme_id=… dev_theme_name=…                       (no mutation)
+#   create --name "<NAME>" [--reuse] [--no-build] [--build-cmd "<cmd>"]
+#       → build repo → push code (settings ignored) to a new unpublished theme
+#         (or an existing same-named one with --reuse) → overlay dev-theme settings
+#       → theme_id=… name=… store=… preview_url=… editor_url=… reused=… built=…
+#   refresh --theme <ID> [--no-build] [--build-cmd "<cmd>"]
+#       → build repo → push CODE ONLY to <ID>, leaving its customizer settings intact
+#         (reuse this when a preview theme's code broke and needs a redeploy)
+#       → theme_id=… store=… preview_url=… editor_url=… built=…
 #
 # Output is `key=value` lines on stdout. Errors print `error=<reason>` and exit non-zero.
-# Requires: shopify CLI, jq.
+# Requires: shopify CLI, jq; npm for the default build.
 
 set -euo pipefail
 
 TOML="${TOML_PATH:-shopify.theme.toml}"
+
+# Customizer content copied from the dev theme; everything else is code from the repo.
+SETTINGS_PATTERNS=(
+  "config/settings_data.json"
+  "templates/*.json"
+  "templates/**/*.json"
+  "sections/*.json"
+)
 
 fail() { printf 'error=%s\n' "$1"; exit 1; }
 
@@ -38,7 +57,6 @@ command -v jq >/dev/null 2>&1 || fail "jq not found on PATH (install: brew insta
 [ -f "$TOML" ] || fail "config not found: $TOML (run from the project root, or set TOML_PATH)"
 
 # --- parse shopify.theme.toml (token is read but NEVER printed) ---------------
-# Uncommented value of `<key> = "<value>"`: drop lines whose first non-space char is '#'.
 toml_value() {
   grep -E "^[[:space:]]*$1[[:space:]]*=" "$TOML" \
     | grep -vE '^[[:space:]]*#' \
@@ -57,7 +75,11 @@ TOKEN="$(toml_value password || true)"
 
 export SHOPIFY_CLI_THEME_TOKEN="$TOKEN"   # consumed by `shopify`; never echoed
 
-# Find a theme's name by id (best-effort; empty if list fails / id absent).
+# --- helpers ------------------------------------------------------------------
+# Build flag arrays portably (bash 3.2 on macOS has no mapfile).
+IGN=(); for p in "${SETTINGS_PATTERNS[@]}"; do IGN+=(--ignore "$p"); done
+ONLY=(); for p in "${SETTINGS_PATTERNS[@]}"; do ONLY+=(--only "$p"); done
+
 theme_name_by_id() {
   shopify theme list --store "$STORE" --json 2>/dev/null \
     | jq -r --arg id "$1" '.. | objects | select((.id|tostring)==$id) | .name' 2>/dev/null \
@@ -67,6 +89,20 @@ theme_id_by_name() {
   shopify theme list --store "$STORE" --json 2>/dev/null \
     | jq -r --arg n "$1" '.. | objects | select(.name==$n) | .id' 2>/dev/null \
     | head -1 || true
+}
+json_field() { printf '%s' "$1" | jq -r --arg f "$2" '.. | objects | .[$f]? // empty' | head -1; }
+
+NO_BUILD=0
+BUILD_CMD="npm run build"
+BUILT="no"
+run_build() {
+  [ "$NO_BUILD" -eq 1 ] && { BUILT="skipped"; return 0; }
+  local log; log="$(mktemp)"
+  if ( eval "$BUILD_CMD" ) >"$log" 2>&1; then
+    BUILT="yes"; rm -f "$log"
+  else
+    printf 'error=build_failed (%s):\n' "$BUILD_CMD"; tail -n 5 "$log"; rm -f "$log"; exit 1
+  fi
 }
 
 MODE="${1:-}"; shift || true
@@ -84,41 +120,45 @@ case "$MODE" in
       case "$1" in
         --name) NAME="${2:-}"; shift 2 ;;
         --reuse) REUSE=1; shift ;;
+        --no-build) NO_BUILD=1; shift ;;
+        --build-cmd) BUILD_CMD="${2:-}"; shift 2 ;;
         *) fail "unknown arg: $1" ;;
       esac
     done
     [ -n "$NAME" ] || fail "create requires --name \"<new theme name>\""
 
-    # Pull the configured dev theme (code + settings_data + JSON templates) to a
-    # temp dir so the working tree is never touched, then push it as a new theme.
-    TMP="$(mktemp -d)"
-    trap 'rm -rf "$TMP"' EXIT
-    shopify theme pull --store "$STORE" --theme "$DEV_THEME_ID" --path "$TMP" >/dev/null 2>&1 \
-      || fail "pull failed for dev theme $DEV_THEME_ID (check store/token/theme id)"
+    run_build
 
-    REUSED=false
-    EXISTING=""
+    # 1) push the built local code (settings ignored) to a new/existing theme.
+    EXISTING=""; REUSED=false
     [ "$REUSE" -eq 1 ] && EXISTING="$(theme_id_by_name "$NAME")"
 
+    ERR="$(mktemp)"
     if [ -n "$EXISTING" ]; then
-      OUT="$(shopify theme push --store "$STORE" --theme "$EXISTING" --path "$TMP" --json 2>push_err.log)" \
-        && REUSED=true || { printf 'error=push_failed_reuse '; sed -n '1,3p' push_err.log; rm -f push_err.log; exit 1; }
-      rm -f push_err.log
+      OUT="$(shopify theme push --store "$STORE" --theme "$EXISTING" --path . "${IGN[@]}" --json 2>"$ERR")" \
+        || { printf 'error=push_code_failed_reuse:\n'; tail -n 5 "$ERR"; rm -f "$ERR"; exit 1; }
+      REUSED=true
     else
-      if ! OUT="$(shopify theme push --store "$STORE" --unpublished --theme "$NAME" --path "$TMP" --json 2>push_err.log)"; then
-        if grep -qiE 'limit|maximum|too many' push_err.log; then
-          rm -f push_err.log
-          fail "theme_limit — store is at its theme cap (20 non-Plus / 100 Plus). Delete an old theme or re-run with --reuse."
+      if ! OUT="$(shopify theme push --store "$STORE" --unpublished --theme "$NAME" --path . "${IGN[@]}" --json 2>"$ERR")"; then
+        if grep -qiE 'limit|maximum|too many' "$ERR"; then
+          rm -f "$ERR"; fail "theme_limit — store is at its theme cap (20 non-Plus / 100 Plus). Delete an old theme or re-run with --reuse."
         fi
-        printf 'error=push_failed '; sed -n '1,3p' push_err.log; rm -f push_err.log; exit 1
+        printf 'error=push_code_failed:\n'; tail -n 5 "$ERR"; rm -f "$ERR"; exit 1
       fi
-      rm -f push_err.log
     fi
+    rm -f "$ERR"
 
-    THEME_ID="$(printf '%s' "$OUT" | jq -r '.. | objects | .id? // empty' | head -1)"
-    PREVIEW="$(printf '%s' "$OUT" | jq -r '.. | objects | .preview_url? // empty' | head -1)"
-    EDITOR="$(printf '%s' "$OUT" | jq -r '.. | objects | .editor_url? // empty' | head -1)"
-    [ -n "$THEME_ID" ] || fail "push succeeded but could not parse theme id from --json output"
+    THEME_ID="$(json_field "$OUT" id)"
+    PREVIEW="$(json_field "$OUT" preview_url)"
+    EDITOR="$(json_field "$OUT" editor_url)"
+    [ -n "$THEME_ID" ] || fail "code push succeeded but could not parse theme id from --json"
+
+    # 2) overlay the dev theme's customizer settings onto the new theme.
+    TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+    shopify theme pull --store "$STORE" --theme "$DEV_THEME_ID" --path "$TMP" "${ONLY[@]}" --nodelete >/dev/null 2>&1 \
+      || fail "pull of dev-theme settings failed (dev theme id $DEV_THEME_ID)"
+    shopify theme push --store "$STORE" --theme "$THEME_ID" --path "$TMP" --nodelete "${ONLY[@]}" >/dev/null 2>&1 \
+      || fail "overlay of dev-theme settings onto $THEME_ID failed"
 
     printf 'theme_id=%s\n' "$THEME_ID"
     printf 'name=%s\n' "$NAME"
@@ -126,9 +166,37 @@ case "$MODE" in
     printf 'preview_url=%s\n' "$PREVIEW"
     printf 'editor_url=%s\n' "$EDITOR"
     printf 'reused=%s\n' "$REUSED"
+    printf 'built=%s\n' "$BUILT"
+    ;;
+
+  refresh)
+    TARGET=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --theme) TARGET="${2:-}"; shift 2 ;;
+        --no-build) NO_BUILD=1; shift ;;
+        --build-cmd) BUILD_CMD="${2:-}"; shift 2 ;;
+        *) fail "unknown arg: $1" ;;
+      esac
+    done
+    [ -n "$TARGET" ] || fail "refresh requires --theme <existing theme id>"
+
+    run_build
+
+    ERR="$(mktemp)"
+    if ! OUT="$(shopify theme push --store "$STORE" --theme "$TARGET" --path . "${IGN[@]}" --json 2>"$ERR")"; then
+      printf 'error=refresh_push_failed:\n'; tail -n 5 "$ERR"; rm -f "$ERR"; exit 1
+    fi
+    rm -f "$ERR"
+
+    printf 'theme_id=%s\n' "$(json_field "$OUT" id)"
+    printf 'store=%s\n' "$STORE"
+    printf 'preview_url=%s\n' "$(json_field "$OUT" preview_url)"
+    printf 'editor_url=%s\n' "$(json_field "$OUT" editor_url)"
+    printf 'built=%s\n' "$BUILT"
     ;;
 
   *)
-    fail "usage: create-preview-theme.sh info | create --name \"<name>\" [--reuse]"
+    fail "usage: create-preview-theme.sh info | create --name \"<name>\" [--reuse] [--no-build] [--build-cmd \"<cmd>\"] | refresh --theme <id> [--no-build] [--build-cmd \"<cmd>\"]"
     ;;
 esac

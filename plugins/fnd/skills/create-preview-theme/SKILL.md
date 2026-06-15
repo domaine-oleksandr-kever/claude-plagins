@@ -1,13 +1,14 @@
 ---
 name: create-preview-theme
 description: >
-  Create (or refresh) an unpublished Shopify PREVIEW theme by duplicating the configured dev
-  theme — a standalone wrapper around the create-preview-theme.sh script, useful for testing the
-  preview-theme mechanics outside the full PR flow. Reads store / dev-theme-id / Theme Access
-  token from shopify.theme.toml (never exposing the token), pulls the dev theme and pushes it
-  unpublished, then returns the theme id + preview / editor links. Use when the user asks to
-  create / make / spin up a preview theme, duplicate the dev theme, or test the preview script,
-  or invokes /create-preview-theme.
+  Create an unpublished Shopify PREVIEW theme from your branch — builds the local code and
+  overlays the dev theme's customizer settings, so the preview shows YOUR (fixed) code with
+  realistic content. A standalone wrapper around create-preview-theme.sh, also handy for testing
+  the mechanics outside the full PR flow. Reads store / dev-theme-id / Theme Access token from
+  shopify.theme.toml (never exposing the token) and returns the theme id + preview / editor links.
+  Use when the user asks to create / make / spin up a preview theme or test the preview script, or
+  invokes /create-preview-theme. To redeploy code into an EXISTING preview theme, use
+  update-preview-theme.
 argument-hint: "[jira-keys] [theme-name] [--reuse] [preview-path]"
 arguments:
   - name: jira_keys
@@ -23,13 +24,16 @@ allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/skills/create-pull-request/scripts/cre
 
 # Create preview theme
 
-Duplicate the configured **dev theme** into a named, **unpublished** preview theme — so its
-customizer settings are preserved (a real server-side-equivalent duplicate done via the CLI,
-not `themeDuplicate`). This skill is a thin wrapper over
-`${CLAUDE_PLUGIN_ROOT}/skills/create-pull-request/scripts/create-preview-theme.sh`; the same
-script `create-pull-request` uses, so running this is a good way to **test the mechanics in
-isolation**. See `${CLAUDE_PLUGIN_ROOT}/skills/create-pull-request/REFERENCE.md → Preview theme`
-for the full contract.
+Build a named, **unpublished** preview theme = **your branch's code (built locally)** + the
+**dev theme's customizer settings**. Code comes from the repo (so the fixes in your branch show
+up); only the settings (`config/settings_data.json`, `templates/**/*.json`, section groups
+`sections/*.json`) are copied from the configured dev theme. This deliberately does **not** clone
+the dev theme's code — that code may be stale or broken. This skill is a thin wrapper over
+`${CLAUDE_PLUGIN_ROOT}/skills/create-pull-request/scripts/create-preview-theme.sh` (the same
+script `create-pull-request` uses), so running it is a good way to **test the mechanics in
+isolation**. To redeploy code into an existing preview theme without touching its settings, use
+**`update-preview-theme`** (the script's `refresh` mode). See
+`${CLAUDE_PLUGIN_ROOT}/skills/create-pull-request/REFERENCE.md → Preview theme` for the full contract.
 
 > **Security:** the Theme Access token lives in `shopify.theme.toml`. **Never `Read` that file** —
 > the script consumes the token inside the `shopify` subprocess and never prints it. Pass nothing
@@ -48,15 +52,19 @@ for the full contract.
      `dev_theme_name` for the key(s): one key → `[ELC-126] Kever | Domaine`; several → one bracket,
      prefix once, numbers slash-separated → `[ELC-299/307/309] Kever | Domaine`.
    - Else **ask** the developer for the name (or the ticket key(s) to derive it).
-3. **Confirm before mutating.** This creates a real theme on the store. Show the final name and
-   `[ create / reuse existing / cancel ]`. Proceed only on explicit confirmation.
-4. **Create.** Run `create-preview-theme.sh create --name "<name>"` (add `--reuse` if the developer
-   chose to refresh an existing same-named theme). On `error=theme_limit`, tell the developer the
-   store is at its cap (20 non-Plus / 100 Plus) and offer `--reuse` or deleting an old theme.
-5. **Report.** Print the resulting `theme_id`, `preview_url`, `editor_url`, and whether it was
-   `reused`. If a `preview_path` is known, also give the page-deep-linked preview
+3. **Confirm before mutating.** This builds the repo and creates a real theme on the store. Show
+   the final name and `[ create / reuse existing / cancel ]`. Proceed only on explicit confirmation.
+4. **Create.** Run `create-preview-theme.sh create --name "<name>"` (add `--reuse` to push into an
+   existing same-named theme instead of making a new one). The script runs `npm run build`, pushes
+   the built code (settings ignored), then overlays the dev theme's settings — pass `--no-build` if
+   the developer already built, or `--build-cmd "<cmd>"` for a non-default build. On
+   `error=theme_limit`, the store is at its cap (20 non-Plus / 100 Plus) — offer `--reuse` or
+   deleting an old theme. On `error=build_failed`, surface the build output and stop.
+5. **Report.** Print the resulting `theme_id`, `preview_url`, `editor_url`, `reused`, and `built`.
+   If a `preview_path` is known, also give the page-deep-linked preview
    (`<preview_url-origin>/<path>?preview_theme_id=<id>`) and the editor-on-template link
-   (`…/editor?previewPath=<url-encoded path>`).
+   (`…/editor?previewPath=<url-encoded path>`). Note the settings↔code caveat: if the branch
+   changed a section/block schema, some dev-theme settings may not map cleanly.
 
 ## Quality bar
 
