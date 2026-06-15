@@ -50,6 +50,13 @@ SETTINGS_PATTERNS=(
   "sections/*.json"
 )
 
+# Canonical Shopify theme directories. We push ONLY these (a whitelist), so non-theme
+# paths in the repo (multi-brand build sources, tmp/ artifacts, metaobjects-def.json,
+# src/, schemas/, node_modules/, …) are never sent — regardless of the repo's
+# .shopifyignore. Without this, `theme push --path .` scans them and the CLI crashes
+# parsing the API's rejection of an invalid asset.
+THEME_DIRS=( assets blocks config layout locales sections snippets templates )
+
 fail() { printf 'error=%s\n' "$1"; exit 1; }
 
 command -v shopify >/dev/null 2>&1 || fail "shopify CLI not found on PATH"
@@ -77,8 +84,11 @@ export SHOPIFY_CLI_THEME_TOKEN="$TOKEN"   # consumed by `shopify`; never echoed
 
 # --- helpers ------------------------------------------------------------------
 # Build flag arrays portably (bash 3.2 on macOS has no mapfile).
-IGN=(); for p in "${SETTINGS_PATTERNS[@]}"; do IGN+=(--ignore "$p"); done
-ONLY=(); for p in "${SETTINGS_PATTERNS[@]}"; do ONLY+=(--only "$p"); done
+IGN=(); for p in "${SETTINGS_PATTERNS[@]}"; do IGN+=(--ignore "$p"); done   # settings to skip on code push
+ONLY=(); for p in "${SETTINGS_PATTERNS[@]}"; do ONLY+=(--only "$p"); done   # settings-only, for the overlay
+# Restrict code pushes to real theme dirs (flat + nested). Composes with --ignore.
+ONLY_THEME=(); for d in "${THEME_DIRS[@]}"; do ONLY_THEME+=(--only "$d/*" --only "$d/**"); done
+EXTRA_IGN=()   # extra --ignore patterns passed through from the CLI (--ignore-extra)
 
 theme_name_by_id() {
   shopify theme list --store "$STORE" --json 2>/dev/null \
@@ -91,6 +101,18 @@ theme_id_by_name() {
     | head -1 || true
 }
 json_field() { printf '%s' "$1" | jq -r --arg f "$2" '.. | objects | .[$f]? // empty' | head -1; }
+
+# Report a push failure with the REAL cause, not a truncated trace. Keeps the full
+# stderr log (in $ERR) and points to it, plus shows the last 25 lines inline. Shopify
+# crashes ("undefined method 'dig' for nil") when an invalid asset is rejected — the
+# offending file is named a few lines above the ruby trace, so show enough context.
+push_fail() {
+  printf 'error=%s\n' "$1"
+  printf 'log=%s\n' "$ERR"
+  printf -- '--- last 25 lines of shopify stderr ---\n'
+  tail -n 25 "$ERR"
+  exit 1
+}
 
 NO_BUILD=0
 BUILD_CMD="npm run build"
@@ -122,6 +144,7 @@ case "$MODE" in
         --reuse) REUSE=1; shift ;;
         --no-build) NO_BUILD=1; shift ;;
         --build-cmd) BUILD_CMD="${2:-}"; shift 2 ;;
+        --ignore-extra) EXTRA_IGN+=(--ignore "${2:-}"); shift 2 ;;
         *) fail "unknown arg: $1" ;;
       esac
     done
@@ -134,16 +157,16 @@ case "$MODE" in
     [ "$REUSE" -eq 1 ] && EXISTING="$(theme_id_by_name "$NAME")"
 
     ERR="$(mktemp)"
+    # ${EXTRA_IGN[@]+"${EXTRA_IGN[@]}"} expands to nothing when empty (bash-3.2 set -u safe).
     if [ -n "$EXISTING" ]; then
-      OUT="$(shopify theme push --store "$STORE" --theme "$EXISTING" --path . "${IGN[@]}" --json 2>"$ERR")" \
-        || { printf 'error=push_code_failed_reuse:\n'; tail -n 5 "$ERR"; rm -f "$ERR"; exit 1; }
+      OUT="$(shopify theme push --store "$STORE" --theme "$EXISTING" --path . "${ONLY_THEME[@]}" "${IGN[@]}" ${EXTRA_IGN[@]+"${EXTRA_IGN[@]}"} --json 2>"$ERR")" \
+        || push_fail push_code_failed_reuse
       REUSED=true
     else
-      if ! OUT="$(shopify theme push --store "$STORE" --unpublished --theme "$NAME" --path . "${IGN[@]}" --json 2>"$ERR")"; then
-        if grep -qiE 'limit|maximum|too many' "$ERR"; then
-          rm -f "$ERR"; fail "theme_limit — store is at its theme cap (20 non-Plus / 100 Plus). Delete an old theme or re-run with --reuse."
-        fi
-        printf 'error=push_code_failed:\n'; tail -n 5 "$ERR"; rm -f "$ERR"; exit 1
+      if ! OUT="$(shopify theme push --store "$STORE" --unpublished --theme "$NAME" --path . "${ONLY_THEME[@]}" "${IGN[@]}" ${EXTRA_IGN[@]+"${EXTRA_IGN[@]}"} --json 2>"$ERR")"; then
+        grep -qiE 'limit|maximum|too many' "$ERR" \
+          && { rm -f "$ERR"; fail "theme_limit — store is at its theme cap (20 non-Plus / 100 Plus). Delete an old theme or re-run with --reuse."; }
+        push_fail push_code_failed
       fi
     fi
     rm -f "$ERR"
@@ -176,6 +199,7 @@ case "$MODE" in
         --theme) TARGET="${2:-}"; shift 2 ;;
         --no-build) NO_BUILD=1; shift ;;
         --build-cmd) BUILD_CMD="${2:-}"; shift 2 ;;
+        --ignore-extra) EXTRA_IGN+=(--ignore "${2:-}"); shift 2 ;;
         *) fail "unknown arg: $1" ;;
       esac
     done
@@ -184,8 +208,8 @@ case "$MODE" in
     run_build
 
     ERR="$(mktemp)"
-    if ! OUT="$(shopify theme push --store "$STORE" --theme "$TARGET" --path . "${IGN[@]}" --json 2>"$ERR")"; then
-      printf 'error=refresh_push_failed:\n'; tail -n 5 "$ERR"; rm -f "$ERR"; exit 1
+    if ! OUT="$(shopify theme push --store "$STORE" --theme "$TARGET" --path . "${ONLY_THEME[@]}" "${IGN[@]}" ${EXTRA_IGN[@]+"${EXTRA_IGN[@]}"} --json 2>"$ERR")"; then
+      push_fail refresh_push_failed
     fi
     rm -f "$ERR"
 
