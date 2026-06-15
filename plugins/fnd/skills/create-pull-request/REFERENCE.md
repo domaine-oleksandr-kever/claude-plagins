@@ -7,13 +7,14 @@ GitHub PR template exists in the repo, merge these sections into it rather than 
 
 `[ELC-XX][Type] Short, outcome-focused description`
 
-- `[ELC-XX]` — Jira ticket key; always include when a ticket is linked.
+- `[ELC-XX]` — Jira ticket key; always include when a ticket is linked. **Multiple tickets** (one PR closing several bugs/tasks) → one bracket, project prefix once, numbers slash-separated: `[ELC-299/307/309/315/382][Type] …`.
 - `[Type]` — `Feature` | `Fix` | `Refactor` | `Chore` | `Docs` | `Style` | `Perf` | `Test`.
 
 Examples:
 
 - `[ELC-42][Feature] PowerReviews integration with star ratings, review snippets, and write form`
 - `[ELC-108][Fix] Mega-menu closing on hover when submenu is active`
+- `[ELC-299/307/309/315/382][Fix] PDP batch: gallery focus, mobile zoom, swatch labels, sticky CTA, price alignment`
 - `[ELC-73][Refactor] Extract shared header logic into reusable snippets`
 
 ## Body sections
@@ -22,7 +23,7 @@ Populate these (adapt headings if a team template exists):
 
 - **Summary** — what was implemented and why (short, reviewer-friendly).
 - **Theme preview** — the conditional table below.
-- **Jira ticket** — key + URL.
+- **Jira ticket** — key + URL (list every ticket when the PR closes more than one).
 - **Technical approach** — summary of the approved TA; call out deviations or additions made during implementation and why.
 - **Changes made** — grouped by area (sections/blocks/snippets, styles, schemas/locales, config, scripts).
 - **Steps to test** — paste from Jira, or summarise with a pointer to the ticket field if long.
@@ -50,7 +51,7 @@ Decision flow (step 4 of the skill):
 1. **Args win.** If `theme_name` / `theme_url` / `theme_admin_url` were passed in, use them; skip creation.
 2. **`info`** (`create-preview-theme.sh info`) detects `store`, `dev_theme_id`, `dev_theme_name`.
    - **`error=…`** (no `shopify.theme.toml`, missing `shopify`/`jq`, unparseable config) → **manual path**: ask the developer for the theme name + Preview / Admin URLs.
-   - **success** → propose the new name (swap the role prefix for the Jira key: `[DEV] Kever | Domaine` → `[ELC-126] Kever | Domaine`) and **ask before mutating**: `create the preview theme now? [ yes / no ]`.
+   - **success** → propose the new name (swap the role prefix for the Jira key: `[DEV] Kever | Domaine` → `[ELC-126] Kever | Domaine`; **multiple tickets** → one bracket, prefix once, slash-separated numbers: `[ELC-299/307/309/315/382] Kever | Domaine`) and **ask before mutating**: `create the preview theme now? [ yes / no ]`. One PR = one preview theme regardless of how many tickets it carries — the theme is a duplicate of the **current** dev theme, so it reflects everything currently on it, not one ticket in isolation.
 3. **`create`** (`create-preview-theme.sh create --name "<name>" [--reuse]`) pulls the dev theme to a temp dir (working tree untouched) and pushes it unpublished. It prints `theme_id`, `preview_url`, `editor_url`, `reused`. Use `--reuse` to refresh an existing same-named theme instead of stacking duplicates. On `error=theme_limit` the store is at its cap (20 / 100) — re-run with `--reuse` or delete an old theme.
 
 ### Page deep-links
@@ -63,6 +64,10 @@ sending the reviewer to the home page:
 - **Admin** → the theme editor on that template: `https://<store>/admin/themes/<id>/editor?previewPath=<url-encoded path>`, or `?template=<name>` when the developer names the template (e.g. `product`, `product.lipglass`).
 
 If the path or template is unknown or ambiguous, **ask the developer — never guess.**
+
+**Several pages / several tickets:** when the bugs live on different pages, list one deep-link per
+page in the Preview row (e.g. `[PDP](…/products/x?preview_theme_id=ID) · [Cart](…/cart?preview_theme_id=ID)`),
+ideally labelled by ticket. Same preview theme ID throughout — only the path differs.
 
 ## Theme-preview table — conditional construction
 
