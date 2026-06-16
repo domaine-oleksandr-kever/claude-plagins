@@ -4,7 +4,8 @@ description: >
   Draft a Domaine Technical Approach (TA) for a Jira ticket — Workflow 2 of the
   Agentic Assisted Development series. Ingests the ticket's Description and
   Acceptance Criteria via Atlassian MCP, validates readiness, then writes the
-  canonical eight-section TA markdown and (after approval) updates the Jira
+  short-format TA markdown (Summary · Assumptions · Data / Config · Implementation ·
+  Accessibility & Performance · Dependencies · Files) and (after approval) updates the Jira
   Technical Approach field. Use when the user asks to write, draft, or update a
   Technical Approach / TA for a Jira ticket, or invokes /write-technical-approach.
 argument-hint: "<jira-ticket-url-or-key>"
@@ -33,9 +34,9 @@ Series position: Workflow 2 — runs after the ticket is validated and before `d
 
 **The ticket's Description and Acceptance Criteria govern the TA.** Every section describes **how** we deliver those requirements in this repo.
 
-- A decision not grounded in the AC belongs in **Assumptions** (engineer-confirmed, with a reason) or **Open follow-ups** (for BSA / design).
+- A decision not grounded in the AC belongs in **Assumptions** (engineer-confirmed, with a reason) — not quietly inside another section.
 - If the AC is ambiguous or incomplete, **stop** and flag it before drafting — do not invent scope.
-- Fold ticket-stated assumptions into the Assumptions block so TA and ticket agree.
+- Fold ticket-stated assumptions into the **Assumptions** section so TA and ticket agree.
 - Any bullet that doesn't trace to an AC, an assumption, or a repo constraint (the repo's coding rules, core-extension policy, a11y / perf rules) gets cut.
 
 ## Global rules
@@ -59,7 +60,7 @@ Write for a **senior Shopify developer** who already knows the CLI, theme dev/de
 2. **Validate readiness** — confirm Description and AC exist and are sufficient. If missing or ambiguous, **stop**, summarize gaps, ask how to proceed.
 3. **Analyse the codebase** — inspect relevant areas for patterns, layout, dependencies, constraints. Apply the repo's coding rules (Liquid, blocks, Tailwind, a11y, etc.).
 4. **Clarify ambiguities** — ask concise scope/edge-case/environment questions before drafting.
-5. **Draft the TA outline** — use the canonical format in `${CLAUDE_PLUGIN_ROOT}/references/technical-approach-format.md`. The eight numbered H4 sections are fixed and in order: **1. Data Management** (config inventory), **2. Production Dependencies**, **3. Feature Enhancement Considerations**, **4. Integrations** (net-new only), **5. Accessibility**, **6. Performance**, **7. Risk Mitigation**, **8. Code Integrity**. Add an `#### Assumptions (engineer-confirmed)` H4 block above section 1. Anchor every bullet to the AC.
+5. **Draft the TA outline** — use the short format in `${CLAUDE_PLUGIN_ROOT}/references/technical-approach-format.md`. Seven **H4** sections, fixed names and order, no numbering and no title/metadata block: **Summary** (1–2 dense paragraphs), **Assumptions**, **Data / Config**, **Implementation**, **Accessibility & Performance**, **Dependencies**, **Files** (`**New:**` / `**Modified:**` inline path lists). Dense bullets, inline code for every path/object/setting, `·` separators. Anchor every bullet to the AC.
 
 ### ✋ Checkpoint — Phase 1
 
@@ -69,7 +70,7 @@ Present the **outline and open questions**. Wait for approval or edits before Ph
 
 ## Phase 2 — Write & review
 
-1. **Generate the TA** as markdown at `docs/technical-approaches/<TICKET-KEY>-technical-approach.md` (or an engineer-preferred path). Strictly follow the skeleton in `${CLAUDE_PLUGIN_ROOT}/references/technical-approach-format.md`: H4 sections 1–8 in order, Assumptions block above section 1, bullets/tables over prose, inline code for paths. `git add` the new file right after creating it.
+1. **Generate the TA** as markdown at `docs/technical-approaches/<TICKET-KEY>-technical-approach.md` (or an engineer-preferred path). Strictly follow the skeleton in `${CLAUDE_PLUGIN_ROOT}/references/technical-approach-format.md`: the seven H4 sections in order (Summary → Files), starting at `#### Summary` with no title/metadata block, dense bullets over prose, inline code for paths. `git add` the new file right after creating it.
 
 ### ✋ Checkpoint — Phase 2
 
@@ -79,6 +80,6 @@ Present the draft path and summary. The engineer must **read, edit, and approve*
 
 ## Quality bar
 
-- Every section traces to the Description + AC; out-of-AC scope lives in Assumptions / Open follow-ups.
+- Every section traces to the Description + AC; out-of-AC scope lives in **Assumptions** (with a reason).
 - Aligns with Foundation patterns and repo rules.
 - Concise senior-level tone (~5-min read), no AI-speak, no cross-client references, no merge/deploy instructions that bypass engineer ownership.
