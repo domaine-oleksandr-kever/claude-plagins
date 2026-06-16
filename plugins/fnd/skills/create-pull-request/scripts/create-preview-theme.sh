@@ -132,6 +132,44 @@ push_fail() {
   exit 1
 }
 
+# Apply the dev theme's customizer settings onto $1 (target theme id).
+#   $2 = "true" if the theme pre-existed (--reuse), else we created it this run.
+# The dev theme can be "ahead" of this branch — e.g. its templates/product.json
+# references a block type whose schema lives only in another feature branch — and
+# Shopify rejects the push of that template. A partial overlay would give a misleading
+# preview, so on such DRIFT we stop cleanly: report the real cause, delete the code-only
+# theme we just created (nothing half-built left behind), and exit error=settings_drift.
+# The caller then asks the developer to duplicate the dev theme MANUALLY in the Shopify
+# admin (a server-side copy keeps every setting, even drifted ones) and pass theme args.
+# stderr is captured, never swallowed.
+overlay_settings() {
+  local target="$1" reused="$2" tmp perr reason deleted
+  tmp="$(mktemp -d)"; CLEAN_DIRS+=("$tmp")
+  perr="$(mktemp)"
+  if ! shopify theme pull --store "$STORE" --theme "$DEV_THEME_ID" --path "$tmp" "${ONLY[@]}" --nodelete >/dev/null 2>"$perr"; then
+    ERR="$perr"; push_fail overlay_pull_failed
+  fi
+  if shopify theme push --store "$STORE" --theme "$target" --path "$tmp" --nodelete "${ONLY[@]}" >/dev/null 2>"$perr"; then
+    rm -f "$perr"; return 0   # no drift — settings applied
+  fi
+  # Drift: settings reference code not present in this branch. Surface + bail to manual.
+  reason="$(grep -iE 'must be defined|invalid value|could not be synced|invalid' "$perr" | head -1 | sed -E 's/^[[:space:]]*//')"
+  [ -n "$reason" ] || reason="$(grep -iE 'error' "$perr" | head -1 | sed -E 's/^[[:space:]]*//')"
+  deleted="no"
+  if [ "$reused" != "true" ]; then
+    if shopify theme delete --store "$STORE" --theme "$target" --force >/dev/null 2>&1; then deleted="yes"; else deleted="failed"; fi
+  fi
+  printf 'error=settings_drift\n'
+  printf 'cause=%s\n' "${reason:-the dev theme references code not present in this branch}"
+  printf 'dev_theme_id=%s\n' "$DEV_THEME_ID"
+  printf 'created_theme=%s\n' "$target"
+  printf 'created_theme_deleted=%s\n' "$deleted"
+  printf 'log=%s\n' "$perr"
+  printf -- '--- last 25 lines of shopify stderr ---\n'
+  tail -n 25 "$perr"
+  exit 1
+}
+
 NO_BUILD=0
 BUILD_CMD="npm run build"
 BUILT="no"
@@ -196,11 +234,8 @@ case "$MODE" in
     [ -n "$THEME_ID" ] || fail "code push succeeded but could not parse theme id from --json"
 
     # 2) overlay the dev theme's customizer settings onto the new theme.
-    TMP_SET="$(mktemp -d)"; CLEAN_DIRS+=("$TMP_SET")
-    shopify theme pull --store "$STORE" --theme "$DEV_THEME_ID" --path "$TMP_SET" "${ONLY[@]}" --nodelete >/dev/null 2>&1 \
-      || fail "pull of dev-theme settings failed (dev theme id $DEV_THEME_ID)"
-    shopify theme push --store "$STORE" --theme "$THEME_ID" --path "$TMP_SET" --nodelete "${ONLY[@]}" >/dev/null 2>&1 \
-      || fail "overlay of dev-theme settings onto $THEME_ID failed"
+    #    On drift this exits error=settings_drift (and removes the just-created theme).
+    overlay_settings "$THEME_ID" "$REUSED"
 
     printf 'theme_id=%s\n' "$THEME_ID"
     printf 'name=%s\n' "$NAME"

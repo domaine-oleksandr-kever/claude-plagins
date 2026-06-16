@@ -63,8 +63,15 @@ isolation**. To redeploy code into an existing preview theme without touching it
 5. **Report.** Print the resulting `theme_id`, `preview_url`, `editor_url`, `reused`, and `built`.
    If a `preview_path` is known, also give the page-deep-linked preview
    (`<preview_url-origin>/<path>?preview_theme_id=<id>`) and the editor-on-template link
-   (`…/editor?previewPath=<url-encoded path>`). Note the settings↔code caveat: if the branch
-   changed a section/block schema, some dev-theme settings may not map cleanly.
+   (`…/editor?previewPath=<url-encoded path>`).
+   - On **`error=settings_drift`** the dev theme is **ahead of this branch** — its customizer content
+     references a block/template type whose schema lives only in another feature branch, so Shopify
+     won't accept those settings onto a preview built from this branch's code. The script reports the
+     real `cause=` and deletes the code-only theme it just made (`created_theme_deleted=yes`), so
+     nothing half-built is left. **Don't retry** — it'll hit the same wall. Tell the developer to
+     **duplicate the dev theme manually** in the Shopify admin (Online Store → Themes → ⋯ on
+     `[DEV] …` → Duplicate — a server-side copy keeps every setting, even drifted ones) and rename it
+     to the `[ELC-…]` name; the preview URL is then `…/?preview_theme_id=<the new id>`.
 
 ## Quality bar
 

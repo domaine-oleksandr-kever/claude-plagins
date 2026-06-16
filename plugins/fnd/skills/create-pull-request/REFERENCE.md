@@ -45,9 +45,16 @@ branch. The script reads the store / dev-theme-id / Theme Access token from `sho
 (e.g. after a fix) without disturbing its settings, the `refresh` mode / `update-preview-theme`
 skill pushes code only.
 
-> **Settings ↔ code drift:** if the branch changed a section/block schema (renamed settings, etc.),
-> the dev theme's saved settings may not map cleanly onto the new code — some sections can render
-> with defaults. Inherent to any settings-overlay; flag it when the change is structural.
+> **Settings ↔ code drift (`error=settings_drift`):** the dev theme can be **"ahead"** of this
+> branch — e.g. its `templates/product.json` references a block type (`subscription_selector`) whose
+> schema lives only in another feature branch. Shopify rejects pushing that template onto a preview
+> built from this branch's code. A partial overlay would give a misleading preview, so the script
+> **stops**: it reports the real `cause=`, deletes the code-only theme it just created
+> (`created_theme_deleted=yes` — unless it was a `--reuse` of a pre-existing theme), and exits
+> `error=settings_drift`. **The fix is manual:** the developer duplicates the dev theme in the
+> Shopify admin (a server-side copy preserves every setting, drifted or not), renames it to the
+> `[ELC-…]` name, and re-runs `create-pull-request` with `theme_name` + `theme_url` +
+> `theme_admin_url` — which makes the skill use that theme and skip auto-creation.
 
 Code pushes never use `--path .`. The script **assembles a clean push root** containing only the
 canonical theme dirs (`assets blocks config layout locales sections snippets templates`, via APFS
