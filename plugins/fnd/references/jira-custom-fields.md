@@ -105,13 +105,25 @@ This was verified working — it's the source of the Step A table.
 > Tip: `fields: ["*all"]` can return a very large response. If your tooling truncates it, save the
 > result to a file and grep the `names` map for the labels rather than reading the whole payload.
 
-## Parsing ADF responses
+## Parsing ADF responses — markdown when given, decode when not
 
-Custom fields return **Atlassian Document Format** (nested JSON with `type: "doc"`). Either:
+Always request `responseContentFormat: "markdown"`. Then decide **per field** by the value's shape:
 
-- Pass `responseContentFormat: "markdown"` for the overall response where supported, or
-- Walk the ADF tree and extract all `text` values, respecting structure (headings, lists, tables)
-  to reconstruct readable content.
+- **Already a string / markdown** → use it as-is. This is what `description` and `comment` return
+  under `markdown` format.
+- **Still raw ADF** (a JSON object with `type: "doc"`) → **decode it with the bundled converter**.
+  The markdown conversion does **not** apply to rich-text **custom** fields — Acceptance Criteria,
+  Assumptions, Technical Approach, Steps to test, Documentation Links come back as raw ADF even
+  under `markdown` format (verified on ELC-126). Don't hand-walk the JSON; run:
+
+  ```bash
+  node ${CLAUDE_PLUGIN_ROOT}/scripts/adf-to-md.cjs <issue.json> --field <customfield_id>
+  ```
+
+  Save the getJiraIssue response to a temp file and decode each ADF field with `--field`; it prints
+  clean markdown (headings, bold/italic/code/links, lists, code blocks, blockquotes, tables) and
+  keeps the bulky raw ADF out of context. `adf-to-md.cjs` is the inverse of `md-to-adf.cjs` (used on
+  the write side). A field that is `null` is genuinely empty — report it empty, don't decode.
 
 ## Writing to a custom field — emit ADF (don't send markdown/plain text)
 

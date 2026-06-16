@@ -1,0 +1,134 @@
+#!/usr/bin/env node
+/*
+ * adf-to-md.cjs — convert Atlassian Document Format (ADF) JSON to Markdown.
+ *
+ * The inverse of md-to-adf.cjs. Jira rich-text CUSTOM fields (Technical Approach, Steps to
+ * test, Acceptance Criteria, Assumptions, Documentation Links) come back as raw ADF even when
+ * getJiraIssue is called with responseContentFormat:"markdown" (that only converts standard
+ * description/comment fields). The fnd reading path (jira-reader) runs those ADF values through
+ * this so it gets clean markdown deterministically instead of hand-walking nested JSON — and
+ * keeps the bulky raw ADF out of context.
+ *
+ * Usage:
+ *   node adf-to-md.cjs <file.json>                      # an ADF doc, OR a full getJiraIssue response
+ *   node adf-to-md.cjs <issue.json> --field customfield_10038   # extract that field's ADF first
+ *   cat adf.json | node adf-to-md.cjs                   # stdin
+ * Prints Markdown to stdout. Unknown node types degrade gracefully (render their children/text).
+ */
+'use strict';
+const fs = require('fs');
+
+function readJSON() {
+  const args = process.argv.slice(2);
+  const fileArg = args.find((a) => !a.startsWith('--'));
+  let raw;
+  try {
+    raw = fileArg ? fs.readFileSync(fileArg, 'utf8') : fs.readFileSync(0, 'utf8');
+  } catch (e) {
+    process.stderr.write('adf-to-md: cannot read input: ' + e.message + '\n');
+    process.exit(1);
+  }
+  let data;
+  try { data = JSON.parse(raw); } catch (e) {
+    process.stderr.write('adf-to-md: input is not valid JSON: ' + e.message + '\n');
+    process.exit(1);
+  }
+  const fi = args.indexOf('--field');
+  if (fi !== -1 && args[fi + 1]) {
+    const id = args[fi + 1];
+    data = (data.fields && data.fields[id]) || data[id] || data;
+  }
+  return data;
+}
+
+// Find the ADF doc node if a wrapper object was passed.
+function findDoc(node) {
+  if (!node || typeof node !== 'object') return null;
+  if (node.type === 'doc' && Array.isArray(node.content)) return node;
+  for (const k of Object.keys(node)) {
+    const found = findDoc(node[k]);
+    if (found) return found;
+  }
+  return null;
+}
+
+function renderText(node) {
+  let t = node.text != null ? node.text : '';
+  const marks = node.marks || [];
+  const has = (m) => marks.some((x) => x.type === m);
+  if (has('code')) return '`' + t + '`'; // code span can't carry other markdown
+  if (has('strike')) t = '~~' + t + '~~';
+  if (has('em')) t = '*' + t + '*';
+  if (has('strong')) t = '**' + t + '**';
+  const link = marks.find((m) => m.type === 'link');
+  if (link && link.attrs && link.attrs.href) t = '[' + t + '](' + link.attrs.href + ')';
+  return t;
+}
+
+function inline(nodes) {
+  if (!Array.isArray(nodes)) return '';
+  return nodes.map((n) => {
+    if (n.type === 'text') return renderText(n);
+    if (n.type === 'hardBreak') return '\n';
+    if (n.type === 'emoji') return (n.attrs && (n.attrs.shortName || n.attrs.text)) || '';
+    if (n.type === 'mention') return (n.attrs && n.attrs.text) || '';
+    if (n.type === 'inlineCard') return (n.attrs && n.attrs.url) || '';
+    if (n.content) return inline(n.content); // unknown inline wrapper
+    return '';
+  }).join('');
+}
+
+function listItemText(item) {
+  // a listItem holds block nodes (usually one paragraph); join their rendered text
+  return (item.content || []).map((b) => renderBlock(b)).join(' ').trim();
+}
+
+function renderBlock(node, depth) {
+  depth = depth || 0;
+  switch (node.type) {
+    case 'heading': {
+      const lvl = (node.attrs && node.attrs.level) || 1;
+      return '#'.repeat(lvl) + ' ' + inline(node.content);
+    }
+    case 'paragraph':
+      return inline(node.content);
+    case 'bulletList':
+      return (node.content || []).map((li) => '- ' + listItemText(li)).join('\n');
+    case 'orderedList': {
+      let i = (node.attrs && node.attrs.order) || 1;
+      return (node.content || []).map((li) => (i++) + '. ' + listItemText(li)).join('\n');
+    }
+    case 'codeBlock': {
+      const lang = (node.attrs && node.attrs.language) || '';
+      const text = (node.content || []).map((c) => c.text || '').join('');
+      return '```' + lang + '\n' + text + '\n```';
+    }
+    case 'blockquote':
+      return (node.content || []).map((b) => '> ' + renderBlock(b, depth + 1)).join('\n');
+    case 'rule':
+      return '---';
+    case 'table': {
+      const rows = node.content || [];
+      if (!rows.length) return '';
+      const cellsOf = (row) => (row.content || []).map((c) => inline((c.content && c.content[0] && c.content[0].content) || []).replace(/\n/g, ' ').trim());
+      const out = [];
+      const head = cellsOf(rows[0]);
+      out.push('| ' + head.join(' | ') + ' |');
+      out.push('| ' + head.map(() => '---').join(' | ') + ' |');
+      for (let r = 1; r < rows.length; r++) out.push('| ' + cellsOf(rows[r]).join(' | ') + ' |');
+      return out.join('\n');
+    }
+    case 'mediaSingle':
+    case 'mediaGroup':
+      return '_(media omitted)_';
+    default:
+      // unknown block: try children, else inline text
+      if (node.content) return (node.content || []).map((b) => renderBlock(b, depth)).join('\n\n');
+      return node.text || '';
+  }
+}
+
+const doc = findDoc(readJSON());
+if (!doc) { process.stderr.write('adf-to-md: no ADF doc node found in input\n'); process.exit(1); }
+const md = (doc.content || []).map((b) => renderBlock(b)).join('\n\n').replace(/\n{3,}/g, '\n\n').trim();
+process.stdout.write(md + '\n');

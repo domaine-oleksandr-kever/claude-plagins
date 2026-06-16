@@ -18,7 +18,12 @@ Technical Approach, Documentation Links, Steps to Test) follow the verified fiel
 the `expand: "names"` fallback + ADF parsing described in
 `${CLAUDE_PLUGIN_ROOT}/references/jira-custom-fields.md`.
 
-- Resolve the real values; parse ADF into clean text/markdown (don't dump raw ADF).
+- Resolve the real values; parse ADF into clean text/markdown (don't dump raw ADF). Request
+  `responseContentFormat: "markdown"`; if a field is already a string, use it. Rich-text **custom**
+  fields (AC, Assumptions, Technical Approach, Steps to test, Documentation Links) come back as raw
+  ADF even then — **decode them with the converter**: save the response to a temp file and run
+  `node ${CLAUDE_PLUGIN_ROOT}/scripts/adf-to-md.cjs <file> --field <customfield_id>` per field,
+  rather than hand-walking the JSON (keeps the bulky ADF out of your context).
 - A field that returns `null` after discovery is **genuinely empty** — report it as empty,
   don't invent content.
 - Extract any **Figma URLs** found anywhere in the ticket (description, AC, links) into
