@@ -61,7 +61,7 @@ Series position: Workflow 5 — for QA handoff, typically alongside / after `qa-
 
 Present the Steps to Test. Encourage the engineer to **walk through** them (mentally or on preview) to catch gaps.
 
-2. **Update Jira** (only after approval) — ask **manual update** vs **Atlassian MCP**. Place content in the **Steps to Test** custom field per process — not only comments.
+2. **Update Jira** (only after approval) — ask **manual update** vs **Atlassian MCP**. Place content in the **Steps to Test** custom field per process — not only comments. **The Steps to Test field is rich-text (ADF), so convert the approved steps to ADF before writing** — write the approved markdown to a temp file, run `node ${CLAUDE_PLUGIN_ROOT}/scripts/md-to-adf.cjs <that-file>`, then `editJiraIssue` with `fields: { "<Steps to test field id>": <the ADF JSON> }`. Never send the raw markdown string. See **`${CLAUDE_PLUGIN_ROOT}/references/jira-custom-fields.md` → Writing to a custom field — emit ADF**.
 
 ## Quality bar
 

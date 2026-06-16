@@ -11,7 +11,7 @@ argument-hint: "<jira-ticket-url-or-key>"
 arguments:
   - name: jira_ticket
     description: Jira ticket URL or key (e.g. ELC-206). Governing source of truth for the TA. If absent, infer it from the conversation context (ticket already discussed); ask only if it can't be inferred.
-allowed-tools: Read, Glob, Grep, Bash(git add*)
+allowed-tools: Read, Glob, Grep, Bash(git add*), Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/md-to-adf.cjs*)
 ---
 
 # Write Technical Approach (Jira)
@@ -75,7 +75,7 @@ Present the **outline and open questions**. Wait for approval or edits before Ph
 
 Present the draft path and summary. The engineer must **read, edit, and approve** before any Jira update.
 
-2. **Update Jira** (only after approval) — ask whether **(a)** the engineer updates manually or **(b)** you use Atlassian MCP. Put the approved TA in the **Technical Approach** custom field, not only description/comments.
+2. **Update Jira** (only after approval) — ask whether **(a)** the engineer updates manually or **(b)** you use Atlassian MCP. Put the approved TA in the **Technical Approach** custom field, not only description/comments. **The Technical Approach field is rich-text (ADF), so convert the approved markdown to ADF before writing** — run the bundled converter on the approved TA file: `node ${CLAUDE_PLUGIN_ROOT}/scripts/md-to-adf.cjs docs/technical-approaches/<TICKET-KEY>-technical-approach.md`, then call `editJiraIssue` with `fields: { "<TA field id>": <the ADF JSON> }`. Never send the raw markdown string to the field (it stores literally). See **`${CLAUDE_PLUGIN_ROOT}/references/jira-custom-fields.md` → Writing to a custom field — emit ADF**.
 
 ## Quality bar
 

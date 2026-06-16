@@ -53,7 +53,7 @@ Present the checklist; let the engineer add/remove cases. Wait for approval befo
 ## Phase 2 — QA execution
 
 1. **Automated / assisted validation** — with Chrome DevTools MCP (when preview is available): visual pass vs Figma if linked (spawn one `figma-reader` per `figma_urls` entry, in parallel, to get the build spec to compare against), console errors, basic performance signals (LCP/CLS context as applicable). Record **Pass / Fail / Needs review** per item with short evidence (what you checked, what you saw).
-2. **Report findings** — summarize in a structured table or list; separate **blocking** vs **non-blocking**; suggest Jira updates (QA notes, screenshots, reopen criteria) but let the engineer own ticket edits unless they ask you to use Atlassian MCP.
+2. **Report findings** — summarize in a structured table or list; separate **blocking** vs **non-blocking**; suggest Jira updates (QA notes, screenshots, reopen criteria) but let the engineer own ticket edits unless they ask you to use Atlassian MCP. **If you do write to a rich-text field or comment via MCP, convert the markdown to ADF first** — `node ${CLAUDE_PLUGIN_ROOT}/scripts/md-to-adf.cjs <file>` then pass the ADF object to `editJiraIssue` / `addCommentToJiraIssue` (see `${CLAUDE_PLUGIN_ROOT}/references/jira-custom-fields.md` → Writing to a custom field — emit ADF).
 
 ## Quality bar
 

@@ -113,6 +113,73 @@ Custom fields return **Atlassian Document Format** (nested JSON with `type: "doc
 - Walk the ADF tree and extract all `text` values, respecting structure (headings, lists, tables)
   to reconstruct readable content.
 
+## Writing to a custom field — emit ADF (don't send markdown/plain text)
+
+The rich-text fields — **Description, Acceptance Criteria, Assumptions, Technical Approach,
+Steps to test, Documentation Links** (and issue **comments**) — store **Atlassian Document Format**,
+not markdown. When a workflow updates one via `editJiraIssue` (or `addCommentToJiraIssue`),
+**convert the approved content to an ADF document first** and pass that object as the field value.
+A bare markdown/plain string sent to a rich-text field is rejected or stored literally (asterisks,
+`#`, and `|` show up verbatim, lists/tables don't render). This applies to every skill that writes
+back: `write-technical-approach` (Technical Approach), `write-steps-to-test` (Steps to test), and
+any `qa-feature-or-fix` write.
+
+### Use the converter — don't hand-build ADF
+
+Run the approved markdown through the bundled converter instead of assembling ADF JSON by hand:
+
+```bash
+node ${CLAUDE_PLUGIN_ROOT}/scripts/md-to-adf.cjs <approved.md>   # or pipe markdown via stdin
+```
+
+It prints the ADF document JSON to stdout; pass that object straight to `editJiraIssue`. It's
+dependency-free Node, deterministic, and supports headings, **bold**/*italic*/`code`/[links](u)/
+~~strike~~, bullet & ordered lists, fenced code blocks, `---` rules, blockquotes, and GFM tables.
+(Underscore emphasis is deliberately ignored so `customfield_10038`-style snake_case survives — use
+`*`/`**` for emphasis.) Typical flow: write the approved content to a temp `.md`, convert, capture
+the JSON, then `editJiraIssue` with `fields: { "<id>": <that JSON> }`. The cheat-sheet below is just
+to read/verify the output — the script is the path of record.
+
+**Document wrapper** — always this shape:
+
+```json
+{ "type": "doc", "version": 1, "content": [ /* block nodes */ ] }
+```
+
+**Node cheat-sheet** (the blocks these TAs / test steps actually use):
+
+| Markdown | ADF node |
+| --- | --- |
+| `## Heading` | `{"type":"heading","attrs":{"level":2},"content":[{"type":"text","text":"Heading"}]}` |
+| paragraph | `{"type":"paragraph","content":[{"type":"text","text":"…"}]}` |
+| **bold** / *italic* | `text` with `"marks":[{"type":"strong"}]` / `[{"type":"em"}]` |
+| `` `inline code` `` | `text` with `"marks":[{"type":"code"}]` |
+| `[label](url)` | `text` with `"marks":[{"type":"link","attrs":{"href":"url"}}]` |
+| `- item` (bullets) | `{"type":"bulletList","content":[{"type":"listItem","content":[{"type":"paragraph","content":[…]}]}]}` |
+| `1. item` (ordered) | `{"type":"orderedList","content":[{"type":"listItem",…}]}` |
+| fenced code block | `{"type":"codeBlock","attrs":{"language":"liquid"},"content":[{"type":"text","text":"…"}]}` |
+| `---` | `{"type":"rule"}` |
+| table | `table` → `tableRow` → `tableHeader`/`tableCell` → block nodes |
+
+**Minimal worked example** (a TA heading + paragraph with an inline-code reference):
+
+```json
+{ "type": "doc", "version": 1, "content": [
+  { "type": "heading", "attrs": { "level": 2 }, "content": [ { "type": "text", "text": "Approach" } ] },
+  { "type": "paragraph", "content": [
+    { "type": "text", "text": "Extend " },
+    { "type": "text", "text": "sections/main-header.liquid", "marks": [ { "type": "code" } ] },
+    { "type": "text", "text": " — do not edit core." } ] }
+] }
+```
+
+**Call shape:** `editJiraIssue` with `fields: { "<customfield_id>": <ADF doc object> }` — e.g.
+`{ "customfield_10038": { "type": "doc", "version": 1, "content": [ … ] } }` for Technical Approach.
+Keep the per-field ID from the Step A table (resolve via Step B if it's not in the `names` map).
+
+> Honour the existing TA rule: **no internal repo file links** — reference in-repo files with an
+> inline-`code` mark, never a `link` mark. External links (Jira, Figma, public docs) use `link`.
+
 ## Fallback — Atlassian MCP unavailable
 
 If Atlassian MCP tool calls fail ("server does not exist") or Jira is not reachable without auth,
