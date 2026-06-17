@@ -1,6 +1,6 @@
 ---
 name: pre-commit-review
-description: Review the branch's changed files before committing — verify every comment is accurate and still matches the code, strip Jira task numbers (e.g. ELC-123) from comments, and surface refactor / cleanup opportunities. Produces a plan the developer approves before any edit. Use when the user is about to commit, says "before commit", asks to tidy/clean a branch, review comments, or check for stale comments / leftover ticket numbers.
+description: Review the branch's changed files before committing — verify every comment is accurate and still matches the code, strip ticket references from comments (Jira task numbers like ELC-123 and ticket-section pointers like "(AC 1a)", "(TA 1a)", "Acceptance Criteria", "Technical Approach"), and surface refactor / cleanup opportunities. Produces a plan the developer approves before any edit. Use when the user is about to commit, says "before commit", asks to tidy/clean a branch, review comments, or check for stale comments / leftover ticket numbers.
 ---
 
 # Pre-commit review
@@ -53,14 +53,20 @@ For every changed file, inspect each comment — Liquid (`{% comment %}`, `{%- c
 - **A — Accuracy / staleness.** Does the comment still match the code? Flag comments that
   reference renamed symbols, removed behaviour, wrong file/line/selector, an old approach that
   was replaced, or a TODO that's already done. Verify against the *current* code, not memory.
-- **B — Task numbers.** Flag any Jira-style key in a comment: regex `\b[A-Z]{2,}-\d+\b`
-  (e.g. `ELC-70`, `ELC-206`). Propose removing the number while keeping any useful context
-  (reword, don't just delete the sentence). **Keep** Figma node ids (`8947-59132`), SKU codes
-  (`S3HT11`), and design/URL references — those are not task numbers. First-pass signal:
+- **B — Ticket references.** Flag any reference to the ticket **or its parts** in a comment — they
+  go stale when the ticket changes and just clutter the code:
+  - **Jira keys** — `\b[A-Z]{2,}-\d+\b` (e.g. `ELC-70`, `ELC-206`).
+  - **Ticket-section pointers** — `(AC 1a)`, `AC 2`, `(TA 1a)`, `TA 3b`, and the phrases
+    `Acceptance Criteria`, `Technical Approach`, `Steps to Test` used as a *reference to the ticket*.
+  Propose removing the reference while keeping any useful context (reword to say what the code does
+  or why — don't just delete the sentence). **Keep** Figma node ids (`8947-59132`), SKU codes
+  (`S3HT11`), and design/URL references — those aren't ticket references. First-pass signal:
   ```bash
-  git diff "$base"...HEAD | grep -nE '^\+' | grep -E '\b[A-Z]{2,}-[0-9]+\b'
+  git diff "$base"...HEAD | grep -nE '^\+' \
+    | grep -nE '\b[A-Z]{2,}-[0-9]+\b|\((AC|TA)[^)]*\)|\b(AC|TA) [0-9]+[a-z]?\b|Acceptance Criteria|Technical Approach|Steps to Test'
   ```
-  then confirm each hit is inside a comment (not code/data) before flagging.
+  then confirm each hit is inside a **comment** (not code/data) before flagging — a real
+  `Acceptance Criteria` schema label, setting, or UI string is **not** a ticket reference, leave it.
 - **C — Refactor / improvement (required).** Actively look for and propose: duplication, dead
   code, unclear names, copy-pasted blocks that could be shared, or small correctness/readability
   wins **in the changed code only**. Always run this check — every change gets at least a
@@ -82,7 +88,7 @@ first `#` column so the developer can reference findings by number:
 
 | # | File:line | Check | Issue | Proposed change |
 |---|---|---|---|---|
-| 1 | `snippets/foo.liquid:42` | B (task #) | comment says `ELC-70: …` | drop `ELC-70:` → `Flattened parent: …` |
+| 1 | `snippets/foo.liquid:42` | B (ticket ref) | comment says `ELC-70 (AC 1a): …` | drop the ref → `Flattened parent: …` |
 | 2 | `src/entry/bar.ts:18` | A (stale) | comment names `oldFn`, code uses `newFn` | update to `newFn` |
 | 3 | `src/entry/bar.ts:30` | C (refactor) | same 5-line block duplicated below | extract `formatLabel()` helper |
 | 4 | `snippets/baz.liquid:7` | D (untracked) | renders `snippets/baz__item.liquid`, file untracked | `git add snippets/baz__item.liquid` |

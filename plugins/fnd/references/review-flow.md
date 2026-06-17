@@ -59,12 +59,14 @@ are applied, so it records the final reviewed state):
 The cost is **reading the changed files**, which checks A and C (and E) share. So split by
 **files, not by checks**:
 
-- **B (Jira task numbers) and D (untracked referenced files) run inline** in the calling
+- **B (ticket references) and D (untracked referenced files) run inline** in the calling
   skill — they're mechanical (`git diff | grep`, `git status`) and operate on the diff
-  text + git metadata, not full-file reads:
+  text + git metadata, not full-file reads. B covers Jira keys **and** ticket-section pointers
+  (`(AC 1a)`, `(TA 1a)`, "Acceptance Criteria", "Technical Approach", "Steps to Test"):
 
   ```bash
-  git diff "$base"...HEAD | grep -nE '^\+' | grep -E '\b[A-Z]{2,}-[0-9]+\b'   # B candidates
+  git diff "$base"...HEAD | grep -nE '^\+' \
+    | grep -nE '\b[A-Z]{2,}-[0-9]+\b|\((AC|TA)[^)]*\)|\b(AC|TA) [0-9]+[a-z]?\b|Acceptance Criteria|Technical Approach|Steps to Test'   # B candidates
   git status --porcelain | grep '^??'                                          # D candidates
   ```
 
