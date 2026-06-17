@@ -22,7 +22,7 @@ Examples:
 Populate these (adapt headings if a team template exists):
 
 - **Summary** — what was implemented and why (short, reviewer-friendly).
-- **Theme preview** — the conditional table below.
+- **Theme preview** — the conditional table below. **Place it immediately after Summary** (before Jira ticket) so reviewers get the preview link first.
 - **Jira ticket** — key + URL (list every ticket when the PR closes more than one).
 - **Technical approach** — summary of the approved TA; call out deviations or additions made during implementation and why.
 - **Changes made** — grouped by area (sections/blocks/snippets, styles, schemas/locales, config, scripts).
@@ -99,11 +99,13 @@ ideally labelled by ticket. Same preview theme ID throughout — only the path d
 
 Build rows only from what the engineer provided:
 
+Order the rows **Theme name → Theme ID → Preview** (ID is its own row, directly under the name):
+
 | Row            | When to include |
 | -------------- | --------------- |
-| **Theme name** | Only if a theme name was provided. |
-| **Theme ID**   | Only if at least one URL was provided. Extract the numeric ID from either URL — admin pattern `/themes/<ID>`, preview pattern `?preview_theme_id=<ID>`. |
-| **Preview**    | Only if at least one URL was provided. Render available links: `[View theme](THEME_URL)` and/or `[Admin](THEME_ADMIN_URL)` separated by ` · `. Omit the link whose URL was not provided. **Use the full URL as-is** — preserve all query params (`_ab`, `_bt`, `_fd`, `_sc`, `key`, `preview_theme_id`); do not truncate or strip them. |
+| **Theme name** | Only if a theme name is known (provided, or the create script's `name`). |
+| **Theme ID**   | **Whenever the theme ID is known** — its own row, right under Theme name. The create script returns `theme_id` directly; otherwise extract the numeric ID from a URL (admin `/themes/<ID>`, preview `?preview_theme_id=<ID>`). |
+| **Preview**    | Whenever at least one URL is known. Render available links: `[View theme](THEME_URL)` and/or `[Admin](THEME_ADMIN_URL)` separated by ` · `. Omit the link whose URL is missing. **Use the full URL as-is** — preserve all query params (`_ab`, `_bt`, `_fd`, `_sc`, `key`, `preview_theme_id`); do not truncate or strip them. |
 
 Full example (all fields provided):
 

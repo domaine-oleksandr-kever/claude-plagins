@@ -104,7 +104,13 @@ assemble_theme() {
   for d in "${THEME_DIRS[@]}"; do
     if [ -e "$d" ]; then cp -Rc "$d" "$dest/" 2>/dev/null || cp -R "$d" "$dest/"; fi
   done
-  if [ -f .shopifyignore ]; then cp .shopifyignore "$dest/" 2>/dev/null || true; fi
+  # Carry .shopifyignore so intentional excludes still apply — BUT strip its locale-ignore
+  # lines. Repos commonly `locales/*.json` (+ `!` negations) so routine deploys don't clobber
+  # a one-time seed; on a freshly created/seeded preview theme that leaves NO locale files, so
+  # the storefront/admin shows "Translation missing" everywhere (the CLI may not honour the `!`
+  # negations). Dropping the locale lines makes the branch's locales always ship. Other excludes
+  # (settings_data, templates, section groups) stay — we also guard those via --ignore + overlay.
+  if [ -f .shopifyignore ]; then grep -vE 'locales/' .shopifyignore > "$dest/.shopifyignore" 2>/dev/null || true; fi
   printf '%s' "$dest"
 }
 
