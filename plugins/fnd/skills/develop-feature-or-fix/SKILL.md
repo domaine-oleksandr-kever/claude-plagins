@@ -52,10 +52,11 @@ it knows what to map. Steps 1, 3, 4 describe each read; steps 2 and 5–6 run af
 4. **Analyse Figma** — for each Figma URL on the ticket (from the `jira-reader` output or the engineer), **spawn one `figma-reader` subagent per URL, in parallel**; each returns a compact build spec. These can run in parallel with the codebase analysis (step 3). If a URL has no node id or the target frame is unclear (a `figma-reader` returns `needs_clarification`), **ask** for the correct link.
 5. **Interview the engineer until you reach shared understanding** — walk down each branch of the design tree, resolving dependencies between decisions one-by-one. **Ask questions one at a time**, and **for each, give your recommended answer**. If a question can be answered by exploring the codebase, **explore the codebase instead of asking**.
 6. **Create the implementation plan** — informed by the interview: ordered, reviewable steps; files/components/metafields/settings to add or change; call out deviations from the TA and why.
+7. **Optional — pressure-test the plan with deep-research.** Once the plan is ready, **offer** it (never auto-run): *"Want me to run this plan through `deep-research`? It cross-checks the approach against fresh external sources (Shopify theme/Liquid capabilities, app/library behaviour, accessibility/perf, known pitfalls) using the ticket, Figma specs, and docs already in context. ⚠️ **It's token-heavy** — it fans out many web searches and verification passes, so it's worth it mainly for risky, novel, or integration-heavy work. `[ yes / no ]"`*. Default **no** — proceed straight to the checkpoint. On **yes**, invoke the `deep-research` skill, seeding it with the draft plan **plus the fresh context already in this conversation** — the `jira-reader` ticket fields, the `figma-reader` build specs, and any docs/links — so it doesn't re-fetch them, scoped to validating *this* approach (not open-ended research). Fold its findings into the plan and note what changed before presenting.
 
 ### ✋ Checkpoint — Phase 1
 
-Present the **implementation plan** and wait for **explicit approval** before writing production code.
+Present the **implementation plan** (with any deep-research findings folded in) and wait for **explicit approval** before writing production code.
 
 ---
 
