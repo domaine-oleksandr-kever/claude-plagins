@@ -19,11 +19,11 @@ Examples:
 
 ## Body sections
 
-Populate these (adapt headings if a team template exists):
+Populate these (adapt headings if a team template exists), in this order:
 
-- **Summary** — what was implemented and why (short, reviewer-friendly).
-- **Theme preview** — the conditional table below. **Place it immediately after Summary** (before Jira ticket) so reviewers get the preview link first.
-- **Jira ticket** — key + URL (list every ticket when the PR closes more than one).
+- **Summary** — what was implemented and why (short, reviewer-friendly). **First section of the body.**
+- **Jira ticket** — key + URL (list every ticket when the PR closes more than one). **Place it right after Summary**, before the Theme preview.
+- **Theme preview** — the conditional table below. **Place it immediately after the Jira ticket** so reviewers get the preview link next.
 - **Technical approach** — summary of the approved TA; call out deviations or additions made during implementation and why.
 - **Changes made** — grouped by area (sections/blocks/snippets, styles, schemas/locales, config, scripts).
 - **Steps to test** — paste from Jira, or summarise with a pointer to the ticket field if long.
