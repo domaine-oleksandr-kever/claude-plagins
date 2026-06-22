@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "fnd",
   "displayName": "Foundation",
-  "version": "0.12.1",
+  "version": "0.12.2",
   "description": "Domaine Foundation skills for Claude Code — Agentic Assisted Development workflow for Shopify theme work.",
   "author": {
     "name": "Oleksandr Kever",
@@ -35,16 +35,6 @@
     "notion-mcp": {
       "type": "http",
       "url": "https://mcp.notion.com/mcp"
-    },
-    "slack": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "mcp-remote",
-        "https://mcp.slack.com/mcp",
-        "--static-oauth-client-info",
-        "${SLACK_MCP_OAUTH_CLIENT}"
-      ]
     }
   }
 }
