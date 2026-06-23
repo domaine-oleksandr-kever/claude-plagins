@@ -19,7 +19,7 @@ arguments:
     description: If set, refresh an existing same-named theme instead of creating a new duplicate (avoids hitting the store theme cap).
   - name: preview_path
     description: Storefront path to deep-link the preview to (e.g. /products/group-lipglass). Optional.
-allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/skills/create-pull-request/scripts/create-preview-theme.sh*)
+allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/scripts/create-preview-theme.sh*)
 ---
 
 # Create preview theme
@@ -29,7 +29,7 @@ Build a named, **unpublished** preview theme = **your branch's code (built local
 up); only the settings (`config/settings_data.json`, `templates/**/*.json`, section groups
 `sections/*.json`) are copied from the configured dev theme. This deliberately does **not** clone
 the dev theme's code — that code may be stale or broken. This skill is a thin wrapper over
-`${CLAUDE_PLUGIN_ROOT}/skills/create-pull-request/scripts/create-preview-theme.sh` (the same
+`${CLAUDE_PLUGIN_ROOT}/scripts/create-preview-theme.sh` (the same
 script `create-pull-request` uses), so running it is a good way to **test the mechanics in
 isolation**. To redeploy code into an existing preview theme without touching its settings, use
 **`update-preview-theme`** (the script's `refresh` mode). See

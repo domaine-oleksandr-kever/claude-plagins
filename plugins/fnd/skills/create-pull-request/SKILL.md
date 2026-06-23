@@ -21,7 +21,7 @@ arguments:
     description: Shopify admin theme URL / THEME_ADMIN_URL. OPTIONAL — part of the manual triplet. Provided → no auto-creation; auto-filled when the skill creates the preview theme itself.
   - name: preview_path
     description: Storefront path the change should be reviewed on (e.g. /products/group-lipglass). Used to deep-link the Preview + Admin (template) rows. Infer from context; ask if unsure.
-allowed-tools: Read, Glob, Grep, Bash(git status), Bash(git fetch*), Bash(git log*), Bash(git diff*), Bash(git remote*), Bash(gh pr create*), Bash(${CLAUDE_PLUGIN_ROOT}/skills/create-pull-request/scripts/create-preview-theme.sh*)
+allowed-tools: Read, Glob, Grep, Bash(git status), Bash(git fetch*), Bash(git log*), Bash(git diff*), Bash(git remote*), Bash(gh pr create*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/create-preview-theme.sh*)
 ---
 
 # Create PR (GitHub + Jira)
@@ -60,7 +60,7 @@ Series position: Workflow 6 — the final step, after `develop-feature-or-fix` a
 3. **PR metadata** — propose a title `[ELC-XX][Type] Short description` (Type = `Feature` | `Fix` | `Refactor` | `Chore` | `Docs` | `Style` | `Perf` | `Test`). **Multiple tickets** → one bracket, prefix once, numbers slash-separated: `[ELC-299/307/309/315/382][Fix] …`. Confirm the target branch. Capture linked tickets / blocks / related PRs.
 4. **Preview theme** — populate the theme-preview table. See **`create-pull-request/REFERENCE.md` → Preview theme**. In short:
    - If `theme_name` / `theme_url` / `theme_admin_url` were already supplied as arguments, use them as-is (skip creation).
-   - Otherwise run `info`: `${CLAUDE_PLUGIN_ROOT}/skills/create-pull-request/scripts/create-preview-theme.sh info`.
+   - Otherwise run `info`: `${CLAUDE_PLUGIN_ROOT}/scripts/create-preview-theme.sh info`.
      - **Any `error=` line (e.g. no `shopify.theme.toml`, no CLI/jq)** → fall back to the **manual** path: ask the developer for the theme name + Preview / Admin URLs, and build the table from those.
      - **Success** → show the detected dev theme name, propose the new name (replace the `[DEV]`/role prefix with the ticket key(s) — `[DEV] Kever | Domaine` → `[ELC-126] Kever | Domaine`; **multiple tickets** → one bracket, prefix once, slash-separated numbers: `[ELC-299/307/309/315/382] Kever | Domaine`), and **ask: create the preview theme now? `[ yes / no ]`**.
        - **No** → manual path (ask for name + Preview/Admin URLs).

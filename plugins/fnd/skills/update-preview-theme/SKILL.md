@@ -16,7 +16,7 @@ arguments:
     description: Override the build command (default `npm run build`). Optional.
   - name: no_build
     description: Skip the build if the developer already built locally. Optional.
-allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/skills/create-pull-request/scripts/create-preview-theme.sh*)
+allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/scripts/create-preview-theme.sh*)
 ---
 
 # Update preview theme
@@ -26,7 +26,7 @@ touching its customizer settings**. The script rebuilds (`npm run build`) and pu
 **except** `config/settings_data.json`, `templates/**/*.json`, and section groups `sections/*.json`
 — so the configured content the reviewer set up stays put while the code is refreshed. This is the
 fix-and-redeploy counterpart to `create-preview-theme`; both wrap
-`${CLAUDE_PLUGIN_ROOT}/skills/create-pull-request/scripts/create-preview-theme.sh`.
+`${CLAUDE_PLUGIN_ROOT}/scripts/create-preview-theme.sh`.
 
 > **Security:** the Theme Access token lives in `shopify.theme.toml`. **Never `Read` that file** —
 > the script consumes the token inside the `shopify` subprocess and never prints it.
@@ -38,7 +38,7 @@ fix-and-redeploy counterpart to `create-preview-theme`; both wrap
    preview URL, or `/themes/<id>` in the admin URL). Do not guess.
 2. **Confirm before mutating.** This rebuilds and overwrites the theme's **code** (settings are
    preserved). Show the target id and `[ update / cancel ]`. Proceed only on explicit confirmation.
-3. **Refresh.** Run `${CLAUDE_PLUGIN_ROOT}/skills/create-pull-request/scripts/create-preview-theme.sh refresh --theme <id>`
+3. **Refresh.** Run `${CLAUDE_PLUGIN_ROOT}/scripts/create-preview-theme.sh refresh --theme <id>`
    (add `--no-build` if already built, or `--build-cmd "<cmd>"` for a non-default build).
    - **`error=build_failed`** → surface the build output and stop.
    - **Other `error=`** (no `shopify.theme.toml`, missing `shopify`/`jq`, push failure) → report it
