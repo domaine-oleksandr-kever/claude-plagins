@@ -19,11 +19,17 @@ Examples:
 
 ## Body sections
 
-Populate these (adapt headings if a team template exists), in this order:
+**The first three sections are FIXED and ordered — emit them in exactly this order at the very top of the body, before anything else:**
 
-- **Summary** — what was implemented and why (short, reviewer-friendly). **First section of the body.**
-- **Jira ticket** — key + URL (list every ticket when the PR closes more than one). **Place it right after Summary**, before the Theme preview.
-- **Theme preview** — the conditional table below. **Place it immediately after the Jira ticket** so reviewers get the preview link next.
+1. **Summary** — what was implemented and why (short, reviewer-friendly).
+2. **Jira ticket** — key + URL (list every ticket when the PR closes more than one).
+3. **Theme preview** — the conditional table below.
+
+> ⚠️ **The Theme preview table goes in the top third of the body — never at the bottom.** It is the #3 section, immediately after Jira, *above* Technical approach / Changes / Steps to test / QA / Notes. Do **not** reorder these three, do not rename them away, and do not push the preview table down among the trailing sections. A reviewer must hit the preview link without scrolling.
+
+Then the remaining sections (adapt headings if a team template exists; their relative order is flexible, but they all come **after** the fixed three):
+
+- **Technical approach** — summary of the approved TA; call out deviations or additions made during implementation and why.
 - **Technical approach** — summary of the approved TA; call out deviations or additions made during implementation and why.
 - **Changes made** — grouped by area (sections/blocks/snippets, styles, schemas/locales, config, scripts).
 - **Steps to test** — paste from Jira, or summarise with a pointer to the ticket field if long.
