@@ -141,7 +141,7 @@ any `qa-feature-or-fix` write.
 Run the approved markdown through the bundled converter instead of assembling ADF JSON by hand:
 
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/scripts/md-to-adf.cjs <approved.md>   # or pipe markdown via stdin
+node ${CLAUDE_PLUGIN_ROOT}/scripts/md-to-adf.cjs --no-tables <approved.md>   # or pipe markdown via stdin
 ```
 
 It prints the ADF document JSON to stdout; pass that object straight to `editJiraIssue`. It's
@@ -151,6 +151,25 @@ dependency-free Node, deterministic, and supports headings, **bold**/*italic*/`c
 `*`/`**` for emphasis.) Typical flow: write the approved content to a temp `.md`, convert, capture
 the JSON, then `editJiraIssue` with `fields: { "<id>": <that JSON> }`. The cheat-sheet below is just
 to read/verify the output — the script is the path of record.
+
+#### Keep the ADF compact — a huge field value is fragile (and don't fall back to markdown)
+
+A large ADF object is **fragile to inline into one `editJiraIssue` tool call** — one slip breaks the
+JSON, which tempts "shortcutting" by sending a raw **markdown string**. Don't: Jira rich-text
+**custom** fields reject it with `Operation value must be an Atlassian Document (see the Atlassian
+Document Format)`. (The auto markdown→ADF conversion the MCP does for **comments/description** does
+**not** extend to arbitrary custom fields.) ADF is the only accepted form — so keep it small instead:
+
+- **Output is minified by default** (≈half the bytes of the old pretty-printed form) — nothing
+  downstream needs indentation, it all goes into the tool call. Use `--pretty` only to eyeball it.
+- **Pass `--no-tables`.** ADF `table` nodes are by far the heaviest construct (every cell wraps a
+  paragraph). `--no-tables` renders each table row as one compact bullet (`Header: cell · Header:
+  cell`). For long Steps to Test this is a large saving and far more robust.
+- **Prefer headings + bullet/ordered lists over tables in the source markdown.** That keeps the ADF
+  small *and* reads well in Jira; reserve tables for genuinely tabular, short data.
+- The converter **prints a size warning to stderr** when the ADF is large (or table-heavy). Treat it
+  as a signal to **trim/restructure** (shorter content, drop tables) — never as a reason to switch to
+  markdown.
 
 **Document wrapper** — always this shape:
 

@@ -10,10 +10,20 @@
  * ADF JSON.
  *
  * Usage:
- *   node md-to-adf.cjs <file.md>     # read from a file
- *   node md-to-adf.cjs               # read Markdown from stdin
+ *   node md-to-adf.cjs <file.md>         # read from a file
+ *   node md-to-adf.cjs                   # read Markdown from stdin
  *   ... | node md-to-adf.cjs
- * Prints the ADF document JSON to stdout.
+ *   node md-to-adf.cjs --no-tables f.md  # render GFM tables as compact bullet lists
+ *   node md-to-adf.cjs --pretty f.md     # 2-space indented JSON (debugging only)
+ * Prints the ADF document JSON to stdout (MINIFIED by default).
+ *
+ * KEEP IT COMPACT. The output goes straight into an editJiraIssue tool call; a huge ADF blob
+ * is fragile to inline (one typo breaks the structure) — which tempts deviating to a raw
+ * markdown string, which Jira custom fields REJECT ("Operation value must be an Atlassian
+ * Document"). Two levers keep it small: (1) output is minified, not pretty-printed (≈half the
+ * bytes); (2) `--no-tables` renders GFM tables as bullet lists — ADF `table` nodes are by far
+ * the heaviest construct (every cell wraps a paragraph). The script also prints a size warning
+ * to stderr when the ADF is large, so you trim/restructure instead of shipping a fragile blob.
  *
  * Supported: headings (#..######), paragraphs, **bold**, *italic*, `inline code`,
  * [links](url), ~~strike~~, bullet/ordered lists, ``` fenced code blocks ```,
@@ -24,10 +34,18 @@
 'use strict';
 const fs = require('fs');
 
+const ARGV = process.argv.slice(2);
+const OPT = {
+  noTables: ARGV.includes('--no-tables'),
+  pretty: ARGV.includes('--pretty'),
+};
+const FILE_ARG = ARGV.find((a) => !a.startsWith('--'));
+// Warn above this serialized size — large field values are fragile to write back via one tool call.
+const SIZE_WARN_BYTES = 30000;
+
 function readInput() {
-  const arg = process.argv[2];
   try {
-    return arg ? fs.readFileSync(arg, 'utf8') : fs.readFileSync(0, 'utf8');
+    return FILE_ARG ? fs.readFileSync(FILE_ARG, 'utf8') : fs.readFileSync(0, 'utf8');
   } catch (e) {
     process.stderr.write('md-to-adf: cannot read input: ' + e.message + '\n');
     process.exit(1);
@@ -120,18 +138,40 @@ function toADF(md) {
     if (/\|/.test(line) && i + 1 < lines.length && /^\s*\|?[\s:]*-{1,}[-\s:|]*$/.test(lines[i + 1])) {
       const header = cellsOf(line);
       i += 2; // header + separator
-      const rows = [{
-        type: 'tableRow',
-        content: header.map((c) => ({ type: 'tableHeader', content: [para(inlineNodes(c))] })),
-      }];
+      const dataRows = [];
       while (i < lines.length && /\|/.test(lines[i]) && !/^\s*$/.test(lines[i])) {
-        rows.push({
-          type: 'tableRow',
-          content: cellsOf(lines[i]).map((c) => ({ type: 'tableCell', content: [para(inlineNodes(c))] })),
-        });
+        dataRows.push(cellsOf(lines[i]));
         i++;
       }
-      content.push({ type: 'table', content: rows });
+      if (OPT.noTables) {
+        // Compact form: one bullet per data row, "Header: cell · Header: cell".
+        // ADF table nodes are the heaviest construct; this keeps the field small and robust.
+        // Labels are PLAIN text (not bold) so each cell stays a single text node — bold marks
+        // would double the node count per cell and can make a wide table LARGER than the table form.
+        const items = dataRows.map((cells) => {
+          const parts = cells
+            .map((c, j) => {
+              const key = (header[j] || '').trim();
+              if (c === '' && !key) return '';
+              return key ? `${key}: ${c}` : c;
+            })
+            .filter((s) => s !== '');
+          return { type: 'listItem', content: [para(inlineNodes(parts.join(' · ')))] };
+        }).filter((it) => it.content[0].content && it.content[0].content.length);
+        content.push({ type: 'bulletList', content: items.length ? items : [{ type: 'listItem', content: [para([])] }] });
+      } else {
+        const rows = [{
+          type: 'tableRow',
+          content: header.map((c) => ({ type: 'tableHeader', content: [para(inlineNodes(c))] })),
+        }];
+        for (const cells of dataRows) {
+          rows.push({
+            type: 'tableRow',
+            content: cells.map((c) => ({ type: 'tableCell', content: [para(inlineNodes(c))] })),
+          });
+        }
+        content.push({ type: 'table', content: rows });
+      }
       continue;
     }
 
@@ -167,4 +207,18 @@ function toADF(md) {
 }
 
 const adf = toADF(readInput());
-process.stdout.write(JSON.stringify(adf, null, 2) + '\n');
+const min = JSON.stringify(adf);
+
+// Size guardrail: a large field value is fragile to inline into one editJiraIssue call. Warn so
+// the caller trims/restructures (shorter content, --no-tables) instead of falling back to raw
+// markdown (which Jira custom fields reject). Warning goes to stderr; stdout stays pure JSON.
+const hasTables = min.includes('"type":"table"');
+if (min.length > SIZE_WARN_BYTES || (hasTables && min.length > SIZE_WARN_BYTES / 2)) {
+  process.stderr.write(
+    'md-to-adf: warning: ADF is ' + min.length + ' bytes' + (hasTables ? ' and contains table node(s)' : '') +
+    '. Large/table-heavy field values are fragile to write back in one tool call — ' +
+    'consider --no-tables and trimming the content (headings + bullet lists stay compact).\n'
+  );
+}
+
+process.stdout.write((OPT.pretty ? JSON.stringify(adf, null, 2) : min) + '\n');

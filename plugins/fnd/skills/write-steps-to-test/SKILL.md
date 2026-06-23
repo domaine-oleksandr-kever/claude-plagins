@@ -54,6 +54,7 @@ Series position: Workflow 5 — for QA handoff, typically alongside / after `qa-
    - **Visual aids** — reference Figma frames or screenshots where helpful.
    - **Edge cases** — boundaries, empty states, error states.
    - **Audience** — assume the tester is new to this Shopify setup.
+   - **Structure as headings + numbered/bullet steps, not big tables.** A scenario = a short heading + an ordered list of steps with expectations. **Avoid wide GFM tables** — they make the Jira ADF balloon (each cell becomes a nested node) and that large blob is fragile to write back (see step 2). Reserve tables for genuinely tabular, short data.
 
    Use the appropriate template (**General** vs **Bug**) per `ticket_type`.
 
@@ -61,7 +62,7 @@ Series position: Workflow 5 — for QA handoff, typically alongside / after `qa-
 
 Present the Steps to Test. Encourage the engineer to **walk through** them (mentally or on preview) to catch gaps.
 
-2. **Update Jira** (only after approval) — ask **manual update** vs **Atlassian MCP**. Place content in the **Steps to Test** custom field per process — not only comments. **The Steps to Test field is rich-text (ADF), so convert the approved steps to ADF before writing** — write the approved markdown to a temp file, run `node ${CLAUDE_PLUGIN_ROOT}/scripts/md-to-adf.cjs <that-file>`, then `editJiraIssue` with `fields: { "<Steps to test field id>": <the ADF JSON> }`. Never send the raw markdown string. See **`${CLAUDE_PLUGIN_ROOT}/references/jira-custom-fields.md` → Writing to a custom field — emit ADF**.
+2. **Update Jira** (only after approval) — ask **manual update** vs **Atlassian MCP**. Place content in the **Steps to Test** custom field per process — not only comments. **The Steps to Test field is rich-text (ADF), so convert the approved steps to ADF before writing** — write the approved markdown to a temp file, run `node ${CLAUDE_PLUGIN_ROOT}/scripts/md-to-adf.cjs --no-tables <that-file>`, then `editJiraIssue` with `fields: { "<Steps to test field id>": <the ADF JSON> }`. The converter outputs **minified** ADF and `--no-tables` keeps it compact — a big ADF blob is fragile to inline. **Never send the raw markdown string** — custom fields reject it (`Operation value must be an Atlassian Document`); the MCP's markdown auto-conversion only applies to comments/description, not custom fields. If the converter prints a **size warning** to stderr, **trim/restructure** the steps (shorter, drop tables) — do not fall back to markdown. See **`${CLAUDE_PLUGIN_ROOT}/references/jira-custom-fields.md` → Keep the ADF compact**.
 
 ## Quality bar
 
