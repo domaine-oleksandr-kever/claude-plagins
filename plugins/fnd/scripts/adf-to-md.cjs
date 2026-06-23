@@ -65,6 +65,13 @@ function renderText(node) {
   return t;
 }
 
+// Pull a URL off a smart-link / card node (inlineCard, blockCard, embedCard).
+// Most carry attrs.url; some carry attrs.data.url (JSON-LD) instead. Never drop it.
+function cardUrl(node) {
+  const a = node.attrs || {};
+  return a.url || (a.data && (a.data.url || (a.data['@id']))) || '';
+}
+
 function inline(nodes) {
   if (!Array.isArray(nodes)) return '';
   return nodes.map((n) => {
@@ -72,7 +79,10 @@ function inline(nodes) {
     if (n.type === 'hardBreak') return '\n';
     if (n.type === 'emoji') return (n.attrs && (n.attrs.shortName || n.attrs.text)) || '';
     if (n.type === 'mention') return (n.attrs && n.attrs.text) || '';
-    if (n.type === 'inlineCard') return (n.attrs && n.attrs.url) || '';
+    if (n.type === 'inlineCard' || n.type === 'blockCard' || n.type === 'embedCard') {
+      const u = cardUrl(n);
+      return u ? '<' + u + '>' : '';
+    }
     if (n.content) return inline(n.content); // unknown inline wrapper
     return '';
   }).join('');
@@ -117,6 +127,13 @@ function renderBlock(node, depth) {
       out.push('| ' + head.map(() => '---').join(' | ') + ' |');
       for (let r = 1; r < rows.length; r++) out.push('| ' + cellsOf(rows[r]).join(' | ') + ' |');
       return out.join('\n');
+    }
+    case 'blockCard':
+    case 'embedCard': {
+      // A Jira "smart link" pasted on its own line (e.g. a Notion / Figma / Confluence URL).
+      // It carries only attrs.url — render it as an autolink so the URL is never lost.
+      const u = cardUrl(node);
+      return u ? '<' + u + '>' : '';
     }
     case 'mediaSingle':
     case 'mediaGroup':

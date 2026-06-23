@@ -26,8 +26,12 @@ the `expand: "names"` fallback + ADF parsing described in
   rather than hand-walking the JSON (keeps the bulky ADF out of your context).
 - A field that returns `null` after discovery is **genuinely empty** — report it as empty,
   don't invent content.
-- Extract any **Figma URLs** found anywhere in the ticket (description, AC, links) into
-  `figma_urls` so the caller can decide whether to also run `figma-reader`.
+- Extract **every external URL** found anywhere in the ticket (description, AC, TA, Documentation
+  Links, comments) — the ADF decoder preserves inline-mark links **and** block-level smart links
+  (`inlineCard` / `blockCard` / `embedCard`) as `<url>`, so don't lose links pasted on their own
+  line. Sort them into: `figma_urls` (figma.com), `notion_urls` (notion.so / *.notion.site), and
+  `other_links` (everything else worth reading — Confluence, Google docs, Shopify/3rd-party docs).
+  The caller reads them (`reading-linked-docs.md`); you only collect them.
 
 ## Output — your final message, structured, data only
 
@@ -42,8 +46,10 @@ acceptance_criteria:
 assumptions:
 technical_approach:
 steps_to_test:
-documentation_links:        # list
-figma_urls:                 # list
+documentation_links:        # list (the Documentation Links field)
+figma_urls:                 # list — figma.com URLs found anywhere
+notion_urls:                # list — notion.so / *.notion.site URLs found anywhere
+other_links:                # list — other external URLs worth reading (Confluence, docs, …)
 needs_clarification:        # "" if none; else a one-line question for the developer
 ```
 
