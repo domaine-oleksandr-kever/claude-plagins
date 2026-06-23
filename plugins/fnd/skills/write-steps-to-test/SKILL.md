@@ -34,7 +34,7 @@ Series position: Workflow 5 — for QA handoff, typically alongside / after `qa-
 
 - Read the ticket via the **`jira-reader` subagent** (Atlassian MCP) — AC, TA, links, attachments; the optional write-back (Phase 2) stays in the main loop.
 - **Never proceed past the ✋ checkpoint** without explicit engineer confirmation.
-- Steps must be usable by someone **unfamiliar** with the implementation (clear navigation, theme/preview context, expectations).
+- Steps must be usable by someone **unfamiliar** with the implementation (clear navigation, **theme-agnostic** paths, expectations). **The tester runs on their OWN theme/environment**, so **never hard-code a preview-theme link** (no `?preview_theme_id=…`, no dev/preview theme name).
 
 ---
 
@@ -49,7 +49,7 @@ Series position: Workflow 5 — for QA handoff, typically alongside / after `qa-
 ## Phase 2 — Generate Steps to Test
 
 1. **Write Steps to Test** following Domaine standards:
-   - **Point testers to the right place** — theme name, Online Store preview/customizer path, direct URLs, markets if relevant.
+   - **Point testers to the right place, theme-agnostically** — the tester uses **their own theme**, so **don't add a preview-theme link / `?preview_theme_id=…`** and don't name your dev/preview theme. Instead give a **relative storefront path** (e.g. `/products/group-lipglass` when it's known from context), the **template** and **customizer location** (Online Store → which section/block), and markets if relevant — so they reproduce it on whatever theme they're testing.
    - **Expectations per step** — exact outcomes, copy, layout, settings values, breakpoints.
    - **Visual aids** — reference Figma frames or screenshots where helpful.
    - **Edge cases** — boundaries, empty states, error states.
@@ -67,4 +67,4 @@ Present the Steps to Test. Encourage the engineer to **walk through** them (ment
 
 - Full AC coverage.
 - Deterministic steps (no "verify it works" without criteria).
-- Explicit preview/theme context so QA can reproduce.
+- Theme-agnostic navigation (relative path / template / customizer location, **not** a preview-theme link) so any tester reproduces it on their own theme.
