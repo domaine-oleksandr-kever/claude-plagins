@@ -106,6 +106,29 @@ Write it to `docs/<TICKET-KEY>-metaobject-setup.graphql` (and, if useful, a comp
   returned gid inline, paste the gid into the dependent step(s), and move the RUN ORDER pointer
   forward. Keep it accurate enough that someone could re-run the whole thing from the file alone.
 
+## Verifying data-driven Acceptance Criteria (mutate to test)
+
+When you have the admin token and provisioned the data yourself (Mode 1), many AC are **conditional
+on the metafield/metaobject value** — one default render doesn't prove them. Drive each state with
+a mutation, verify, then restore:
+
+- **Enumerated options** (e.g. *"media area supports 4:3 / 1:1"*): verify the default, then
+  `metaobjectUpdate` / `metafieldsSet` the field to each other value (`1:1`), reload, confirm the UI
+  reflects it.
+- **Optional / presence-conditional fields** (e.g. *"heading, body, secondary CTA are all optional;
+  an unconfigured element shows no empty placeholder"*): clear the field, reload, and **inspect the
+  DOM** — confirm the element is genuinely absent, not just visually empty. Repeat per optional
+  element.
+- Walk **every** enumerated/optional/conditional value an AC names; don't assume a state you didn't
+  render.
+
+**Propagation lag:** Shopify can serve a **stale value** for a short window after a mutation. After
+mutating, **re-query the value** (a quick read via `shopify-admin-gql.sh`) to confirm it actually
+changed, then hard-reload (cache-bust) the storefront. If the UI still shows the old value, wait
+briefly and retry **before** concluding the code is wrong — distinguish "not yet propagated" from a
+real bug. Leave the data in a known state (restore defaults or note what you left set) so QA starts
+clean.
+
 ## Plan it in the TA first
 
 In `/write-technical-approach`, the **Data / Config** section should already name the required
