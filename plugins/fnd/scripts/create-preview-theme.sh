@@ -124,7 +124,12 @@ theme_id_by_name() {
     | jq -r --arg n "$1" '.. | objects | select(.name==$n) | .id' 2>/dev/null \
     | head -1 || true
 }
-json_field() { printf '%s' "$1" | jq -r --arg f "$2" '.. | objects | .[$f]? // empty' | head -1; }
+# Tolerant: `2>/dev/null` swallows jq parse errors (the CLI can print a deprecation/upgrade
+# banner before the JSON), and `|| true` neutralizes a no-match / SIGPIPE pipeline status so a
+# bare `VAR=$(json_field …)` can't abort the script under `set -e` (the line-240 guard handles
+# an empty result instead). NB: a `first(.. | objects | .[$f]?)` rewrite is WRONG — it returns
+# empty for the wrapping object — so keep the `| head -1` form.
+json_field() { printf '%s' "$1" | jq -r --arg f "$2" '.. | objects | .[$f]? // empty' 2>/dev/null | head -1 || true; }
 
 # Report a push failure with the REAL cause, not a truncated trace. Keeps the full
 # stderr log (in $ERR) and points to it, plus shows the last 25 lines inline. Shopify
@@ -159,12 +164,18 @@ overlay_settings() {
     rm -f "$perr"; return 0   # no drift — settings applied
   fi
   # Drift: settings reference code not present in this branch. Surface + bail to manual.
-  reason="$(grep -iE 'must be defined|invalid value|could not be synced|invalid' "$perr" | head -1 | sed -E 's/^[[:space:]]*//')"
-  [ -n "$reason" ] || reason="$(grep -iE 'error' "$perr" | head -1 | sed -E 's/^[[:space:]]*//')"
+  # Delete the just-created code-only theme FIRST — cleanup must never depend on the
+  # best-effort cause extraction below. (Previously the greps ran first; a no-match grep
+  # returns non-zero, and under `set -euo pipefail` the bare `reason=$(…)` assignment aborted
+  # the whole script BEFORE this delete and before the error=settings_drift report — so on a
+  # real drift the script died silently AND orphaned the new theme on the store. The `|| true`
+  # guards below close the death; deleting first makes the cleanup robust regardless.)
   deleted="no"
   if [ "$reused" != "true" ]; then
     if shopify theme delete --store "$STORE" --theme "$target" --force >/dev/null 2>&1; then deleted="yes"; else deleted="failed"; fi
   fi
+  reason="$(grep -iE 'must be defined|invalid value|could not be synced|invalid' "$perr" | head -1 | sed -E 's/^[[:space:]]*//' || true)"
+  [ -n "$reason" ] || reason="$(grep -iE 'error' "$perr" | head -1 | sed -E 's/^[[:space:]]*//' || true)"
   printf 'error=settings_drift\n'
   printf 'cause=%s\n' "${reason:-the dev theme references code not present in this branch}"
   printf 'dev_theme_id=%s\n' "$DEV_THEME_ID"
