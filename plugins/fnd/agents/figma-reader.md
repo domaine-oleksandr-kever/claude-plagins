@@ -36,7 +36,7 @@ tokens, over the ~25k-per-`Read` cap — so cover **all** of it without loading 
    Cover all pages before you write the spec.
 4. **Cross-check** the assembled spec against the screenshot. If a measurement is missing or a
    region wouldn't parse, put that in `needs_clarification` — never silently drop it.
-4. **Distil, don't echo.** Build the compact spec from what you extracted; never paste raw
+5. **Distil, don't echo.** Build the compact spec from what you extracted; never paste raw
    design-context JSON into your output. If the node is genuinely huge, cover the
    build-critical parts and note what you summarized rather than dumping everything.
 

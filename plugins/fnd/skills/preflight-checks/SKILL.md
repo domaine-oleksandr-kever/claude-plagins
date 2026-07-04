@@ -26,13 +26,13 @@ Series position: Workflow 1 — runs before everything else.
 ## Operating mode
 
 - **Phase 1 — Environment validation:** **plan mode** — check workspace, MCP connectivity, CLIs, project skills/rules, and the dev server.
-- **Phase 2 — Report & confirmation:** consolidate results, flag blockers, get engineer sign-off.
+- **Phase 2 — Report & confirmation:** consolidate results, flag blockers, get developer sign-off.
 
 ## Global rules
 
-- **Never proceed past the ✋ checkpoint** without explicit engineer confirmation.
+- **Never proceed past the ✋ checkpoint** without explicit developer confirmation.
 - For MCP checks, use the available MCP tools and **report real connection/auth outcomes — do not fabricate success**.
-- Shell version commands require **engineer approval** before running in the agent environment.
+- The CLI version commands in this skill's allow-list are read-only and pre-approved — run them directly. Anything beyond them still needs the developer's go-ahead.
 
 ---
 
@@ -40,11 +40,11 @@ Series position: Workflow 1 — runs before everything else.
 
 Run the full checklist in `${CLAUDE_PLUGIN_ROOT}/references/preflight-checklist.md`:
 
-1. **Workspace / IDE** — confirm the active workspace matches the target project; remind the engineer to verify IDE/MCP security settings against team policy.
+1. **Workspace / IDE** — confirm the active workspace matches the target project; remind the developer to verify IDE/MCP security settings against team policy.
 2. **MCP servers** — Figma, Chrome DevTools, Atlassian, Shopify Dev: confirm installed + authenticated; on failure report the specific error + remediation.
-3. **CLI tools** — run (or ask the engineer to run) the version commands; record versions; flag missing / outdated.
+3. **CLI tools** — run (or ask the developer to run) the version commands; record versions; flag missing / outdated.
 4. **Project skills & rules** — confirm `.claude/skills/` and the repo's coding rules are present; list anything missing + how to restore.
-5. **Local dev server** — determine whether `npm run dev` (or `npm run theme:shopify`) is running; if not, remind the engineer to start it before the develop / QA workflows (they need in-browser validation).
+5. **Local dev server** — determine whether `npm run dev` (or `npm run theme:shopify`) is running; if not, remind the developer to start it before the develop / QA workflows (they need in-browser validation).
 
 ---
 
@@ -55,7 +55,7 @@ Run the full checklist in `${CLAUDE_PLUGIN_ROOT}/references/preflight-checklist.
 
 ### ✋ Checkpoint
 
-Present the report. Once the engineer confirms issues are resolved or accepted, the environment is cleared for Workflows 2–6.
+Present the report. Once the developer confirms issues are resolved or accepted, the environment is cleared for Workflows 2–6.
 
 ## Quality bar
 

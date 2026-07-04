@@ -30,7 +30,6 @@ Examples:
 Then the remaining sections (adapt headings if a team template exists; their relative order is flexible, but they all come **after** the fixed three):
 
 - **Technical approach** — summary of the approved TA; call out deviations or additions made during implementation and why.
-- **Technical approach** — summary of the approved TA; call out deviations or additions made during implementation and why.
 - **Changes made** — grouped by area (sections/blocks/snippets, styles, schemas/locales, config, scripts).
 - **Steps to test** — paste from Jira, or summarise with a pointer to the ticket field if long.
 - **Screenshots / visual evidence** — captures, Figma frames, or DevTools validation notes. If none, say "N/A — non-visual change" or state what was verified.
@@ -42,7 +41,7 @@ Then the remaining sections (adapt headings if a team template exists; their rel
 ## Preview theme — auto-create or manual
 
 The Preview row needs an unpublished theme that shows **this branch's code** with the developer's
-**configured customizer content**. So `scripts/create-preview-theme.sh` builds the local repo
+**configured customizer content**. So `${CLAUDE_PLUGIN_ROOT}/scripts/create-preview-theme.sh` builds the local repo
 (`npm run build`) and pushes the built code, then overlays only the dev theme's settings —
 `config/settings_data.json`, `templates/**/*.json`, and section groups `sections/*.json`. It does
 **not** clone the dev theme's code (which may be stale or broken); code always comes from the
@@ -81,10 +80,10 @@ the full `shopify` stderr — read that, don't guess.
 Decision flow (step 4 of the skill):
 
 1. **Args win.** If `theme_name` / `theme_url` / `theme_admin_url` were passed in, use them; skip creation.
-2. **`info`** (`create-preview-theme.sh info`) detects `store`, `dev_theme_id`, `dev_theme_name`.
+2. **`info`** (`${CLAUDE_PLUGIN_ROOT}/scripts/create-preview-theme.sh info`) detects `store`, `dev_theme_id`, `dev_theme_name`.
    - **`error=…`** (no `shopify.theme.toml`, missing `shopify`/`jq`, unparseable config) → **manual path**: ask the developer for the theme name + Preview / Admin URLs.
-   - **success** → propose the new name (swap the role prefix for the Jira key: `[DEV] Kever | Domaine` → `[ELC-126] Kever | Domaine`; **multiple tickets** → one bracket, prefix once, slash-separated numbers: `[ELC-299/307/309/315/382] Kever | Domaine`) and **ask before mutating**: `create the preview theme now? [ yes / no ]`. One PR = one preview theme regardless of how many tickets it carries — the theme is a duplicate of the **current** dev theme, so it reflects everything currently on it, not one ticket in isolation.
-3. **`create`** (`create-preview-theme.sh create --name "<name>" [--reuse]`) pulls the dev theme to a temp dir (working tree untouched) and pushes it unpublished. It prints `theme_id`, `preview_url`, `editor_url`, `reused`. Use `--reuse` to refresh an existing same-named theme instead of stacking duplicates. On `error=theme_limit` the store is at its cap (20 / 100) — re-run with `--reuse` or delete an old theme.
+   - **success** → propose the new name (swap the role prefix for the Jira key: `[DEV] Kever | Domaine` → `[ELC-126] Kever | Domaine`; **multiple tickets** → one bracket, prefix once, slash-separated numbers: `[ELC-299/307/309/315/382] Kever | Domaine`) and **ask before mutating**: `create the preview theme now? [ yes / no ]`. One PR = one preview theme regardless of how many tickets it carries — the preview overlays the dev theme's **current** customizer settings, so it reflects the content configured right now, not one ticket in isolation.
+3. **`create`** (`${CLAUDE_PLUGIN_ROOT}/scripts/create-preview-theme.sh create --name "<name>" [--reuse]`) builds the branch, assembles the built code into a clean temp dir (working tree untouched), pushes it to a new unpublished theme, then overlays the dev theme's customizer settings. It prints `theme_id`, `preview_url`, `editor_url`, `reused`. Use `--reuse` to refresh an existing same-named theme instead of stacking duplicates. On `error=theme_limit` the store is at its cap (20 / 100) — re-run with `--reuse` or delete an old theme.
 
 ### Page deep-links
 
@@ -103,22 +102,25 @@ ideally labelled by ticket. Same preview theme ID throughout — only the path d
 
 ## Theme-preview table — conditional construction
 
-Build rows only from what the engineer provided:
+Build rows only from what the developer provided:
 
 Order the rows **Theme name → Theme ID → Preview** (ID is its own row, directly under the name):
 
 | Row            | When to include |
 | -------------- | --------------- |
-| **Theme name** | Only if a theme name is known (provided, or the create script's `name`). |
+| **Theme name** | Only if a theme name is known (provided, or the create script's `name`). Foundation names usually contain a pipe — escape it (see the note below this table). |
 | **Theme ID**   | **Whenever the theme ID is known** — its own row, right under Theme name. The create script returns `theme_id` directly; otherwise extract the numeric ID from a URL (admin `/themes/<ID>`, preview `?preview_theme_id=<ID>`). |
 | **Preview**    | Whenever at least one URL is known. Render available links: `[View theme](THEME_URL)` and/or `[Admin](THEME_ADMIN_URL)` separated by ` · `. Omit the link whose URL is missing. **Use the full URL as-is** — preserve all query params (`_ab`, `_bt`, `_fd`, `_sc`, `key`, `preview_theme_id`); do not truncate or strip them. |
+
+> **Pipe escaping:** preview-theme names like `[ELC-126] Kever | Domaine` contain a `|`; inside a
+> Markdown table cell it must be written as `\|` (`[ELC-126] Kever \| Domaine`) or the row breaks.
 
 Full example (all fields provided):
 
 ```markdown
 |                |                                                                                                                                            |
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Theme name** | `my-feature-branch`                                                                                                                        |
+| **Theme name** | `[ELC-126] Kever \| Domaine`                                                                                                               |
 | **Theme ID**   | `123456789`                                                                                                                                |
 | **Preview**    | [View theme](https://store.myshopify.com/?preview_theme_id=123456789) · [Admin](https://admin.shopify.com/store/my-store/themes/123456789) |
 ```

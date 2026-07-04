@@ -1,13 +1,13 @@
 ---
 name: pre-commit-review
-description: Review the branch's changed files before committing — verify every comment is accurate and still matches the code, strip ticket references from comments (Jira task numbers like ELC-123 and ticket-section pointers like "(AC 1a)", "(TA 1a)", "Acceptance Criteria", "Technical Approach"), and surface refactor / cleanup opportunities. Produces a plan the developer approves before any edit. Use when the user is about to commit, says "before commit", asks to tidy/clean a branch, review comments, or check for stale comments / leftover ticket numbers.
+description: Review the branch's changed files before committing — verify every comment is accurate and still matches the code, strip ticket references from comments (Jira task numbers like ELC-123 and ticket-section pointers like "(AC 1a)", "(TA 1a)", "Acceptance Criteria", "Technical Approach"), and surface refactor / cleanup opportunities. Produces a plan the developer approves before any edit. Use when the user is about to commit, says "before commit", asks to tidy/clean a branch, review comments, or check for stale comments / leftover ticket numbers, or invokes /pre-commit-review.
 ---
 
 # Pre-commit review
 
 Hygiene pass over the changed files **before a commit**. Four checks → a written
 plan → developer approves/corrects → apply. **Never commits** (repo rule: never
-`git commit` without explicit per-commit permission — see `feedback_never_commit_without_permission`).
+`git commit` without explicit per-commit permission).
 
 ## 0. Review-flow gate
 
@@ -60,7 +60,8 @@ For every changed file, inspect each comment — Liquid (`{% comment %}`, `{%- c
     `Acceptance Criteria`, `Technical Approach`, `Steps to Test` used as a *reference to the ticket*.
   Propose removing the reference while keeping any useful context (reword to say what the code does
   or why — don't just delete the sentence). **Keep** Figma node ids (`8947-59132`), SKU codes
-  (`S3HT11`), and design/URL references — those aren't ticket references. First-pass signal:
+  (`S3HT11`), design/URL references, and tech acronyms that happen to match the pattern
+  (`UTF-8`, `SHA-256`, `ISO-8601`) — those aren't ticket references. First-pass signal:
   ```bash
   git diff "$base"...HEAD | grep -nE '^\+' \
     | grep -nE '\b[A-Z]{2,}-[0-9]+\b|\((AC|TA)[^)]*\)|\b(AC|TA) [0-9]+[a-z]?\b|Acceptance Criteria|Technical Approach|Steps to Test'
@@ -100,8 +101,9 @@ anything I missed"). Do not edit yet.
 
 After the developer approves (with their corrections), make exactly the agreed edits — nothing
 more. For approved check-D rows, run the agreed `git add <path>` so the referenced files are
-tracked. Then **stop**: report what changed and hand the commit back to the developer (for
-`/commit` here: stage files + `pbcopy` the message; never run `git commit`).
+tracked. Then **stop**: report what changed and hand the commit back to the developer — stage
+the files and suggest `/fnd:commit` (it always shows the message and asks permission before
+committing). Never run `git commit` from this skill.
 
 **Write the marker.** After the edits are applied, record the review for this branch so
 `commit` / `create-pull-request` don't redundantly re-review (recompute `diff_hash` so it

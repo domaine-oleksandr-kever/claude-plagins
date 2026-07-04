@@ -630,10 +630,10 @@ After generating all four files:
 5. **Utility conflicts** — custom utilities may conflict with core or Tailwind defaults.
 6. **Case sensitivity** — token names are case-sensitive in both manifest and usage.
 7. **Missing dependencies** — ensure all Tailwind plugins are installed.
-8. **LineHeight/LetterSpacing units** — Foundation requires PERCENT values. Convert from pixels:
-   - lineHeight: `(lineHeight px / fontSize px) × 100`
-   - letterSpacing: `(letterSpacing px / fontSize px) × 100`
-   - Never store pixel values — always convert to percentages.
+8. **LineHeight/LetterSpacing units** — never emit raw px. The generated CSS uses a **decimal
+   ratio** for line-height (`lineHeight / fontSize`, e.g. 1.17) and **em** for letter-spacing
+   (`letterSpacing / fontSize`) — see *Computed CSS values*. Percent forms
+   (`value / fontSize × 100`) belong to the token-manifest side, not the emitted CSS.
 
 ---
 

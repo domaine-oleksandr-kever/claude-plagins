@@ -41,8 +41,9 @@ Read each file in your group (the diff + enough surrounding code to judge), then
     `schemas/` (TS); snippet params missing LiquidDoc + defaults.
 - **Confirm passed-in hits** (if any): for each task-number hit (`\b[A-Z]{2,}-\d+\b`),
   confirm it's inside a **comment** (not code/data) before keeping it — and keep Figma node
-  ids, SKU codes, and URLs. For each untracked candidate, confirm the diff actually
-  references it.
+  ids, SKU codes, URLs, and tech acronyms that happen to match the pattern (`UTF-8`,
+  `SHA-256`, `ISO-8601`); those aren't ticket references. For each untracked candidate,
+  confirm the diff actually references it.
 
 ## Output — your final message, data only
 
@@ -51,7 +52,9 @@ A single findings table, grouped by file:
 | File:line | Check | Severity | Issue | Proposed change |
 |---|---|---|---|---|
 
-- `Check` ∈ {A, C, E, B, D}. `Severity` ∈ {blocker, warning, nit}.
+- `Check` ∈ {A, C, E} for findings you originate; use `B` (ticket reference) / `D` (untracked
+  referenced file) only to label passed-in hits you confirmed — you never originate those two.
+  `Severity` ∈ {blocker, warning, nit}.
 - `protected-core` violations are **always** `blocker`.
 - Each row is one concrete proposed change with a one-line rationale.
 - If nothing is found, return an empty table plus a one-line `no findings in <N> files`.

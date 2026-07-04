@@ -10,7 +10,7 @@ description: >
 argument-hint: "<brand-slug> (e.g. estee-lauder, mac)"
 arguments:
   - name: brand_slug
-    description: MANDATORY. Brand directory slug under multi-brand/brands/ (e.g. estee-lauder, mac). Ask for this FIRST before doing anything else.
+    description: MANDATORY. Brand directory slug under multi-brand/brands/ (e.g. estee-lauder, mac). If missing, ask for it FIRST before doing anything else.
 allowed-tools: Read, Glob, Grep, Write, Edit, Bash(git add*), Bash(git status*)
 ---
 
@@ -20,9 +20,9 @@ Generate `@colors.css`, `@theme.css`, `@typography.css`, and `@buttons.css` for 
 
 All detailed mapping tables, per-file generation rules, formulas, examples, and edge cases live in **`generate-multi-brand-css/REFERENCE.md`** — read it before generating any file.
 
-## Step 1 — Ask for the brand slug (MANDATORY)
+## Step 1 — Get the brand slug (MANDATORY)
 
-**Always start by asking the user**, before reading anything:
+Use the `brand_slug` argument if it was provided. **If it wasn't, ask the user first**, before reading anything:
 
 > Which brand slug should I generate CSS for? (e.g., `estee-lauder`, `mac`)
 

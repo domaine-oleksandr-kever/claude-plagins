@@ -43,6 +43,7 @@ Match the existing repo pattern first; reach for the APG spec when there's no pr
 - Don't over-engineer — native browser behaviour (`<details>`, `<dialog>`, `popover`) often suffices.
 - Use `aria-labelledby` to reference existing visible text instead of duplicating it in `aria-label`.
 - Avoid duplicate logic between keyboard and mouse handlers; separate ARIA-state management from focus management.
+- Toggle visual state via `data-*` attributes + Tailwind `data-[]:` selectors, not `classList`/`style.*` — the repo lints against those; if legacy code trips `no-restricted-syntax`, see `${CLAUDE_PLUGIN_ROOT}/references/eslint-no-restricted-syntax.md`.
 
 ## Performance
 

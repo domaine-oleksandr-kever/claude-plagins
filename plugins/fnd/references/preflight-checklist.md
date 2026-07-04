@@ -14,8 +14,9 @@ server** item as their browser-validation prerequisite.
 | Git         | `git --version`    | all |
 | GitHub CLI  | `gh --version`     | `create-pull-request` |
 
-Report version numbers; flag anything missing or below known team minimums. Shell commands require
-engineer approval before running in the agent environment.
+Report version numbers; flag anything missing or below known team minimums. The version commands
+above are read-only (the `preflight-checks` skill pre-approves exactly these); any other shell
+command still needs the developer's go-ahead.
 
 ## MCP servers
 

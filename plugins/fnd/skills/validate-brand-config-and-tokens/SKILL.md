@@ -5,7 +5,7 @@ description: >
   against its design-token.manifest.json, and cross-check config.json so brand settings
   (fontMapping, fluidTypography, buttonVariants) are reflected in the CSS — reporting any
   values out of date or any config-driven expectations missing from the CSS. Read-only by
-  default; it only edits files if the engineer approves updates. Use when the user asks to
+  default; it only edits files if the developer approves updates. Use when the user asks to
   validate / audit a brand's design tokens or CSS against its manifest, check brand config
   vs CSS drift, verify Figma token sync surfaced in a brand theme, or invokes
   /validate-brand-config-and-tokens.
@@ -24,9 +24,9 @@ Audit a brand's CSS files (`@colors.css`, `@theme.css`, `@typography.css`, `@but
 
 The detailed per-file audit rules, resolution algorithms, config cross-check tables, report format, and edge cases live in **`validate-brand-config-and-tokens/REFERENCE.md`**. This file is the high-level process.
 
-## Step 1: Ask for Brand Slug (MANDATORY)
+## Step 1: Get the Brand Slug (MANDATORY)
 
-**Always start by asking the user:**
+Use the `brand_slug` argument if it was provided. **If it wasn't, ask the user first:**
 
 > Which brand slug should I validate? (e.g., `estee-lauder`, `mac`)
 

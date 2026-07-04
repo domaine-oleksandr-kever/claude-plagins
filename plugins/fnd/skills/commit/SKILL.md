@@ -1,6 +1,6 @@
 ---
 name: commit
-description: Create git commits using the Conventional Commits specification. Use when the user asks to commit changes, write a commit message, or run git commit.
+description: Create git commits using the Conventional Commits specification. Use when the user asks to commit changes, write a commit message, or run git commit, or invokes /commit.
 allowed-tools: Bash(git status*), Bash(git diff*), Bash(git add*), Bash(git commit*), Bash(git log*), Bash(git ls-files*), Read, Glob, Grep
 ---
 

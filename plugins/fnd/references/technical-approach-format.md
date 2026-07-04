@@ -12,7 +12,7 @@ Domaine tickets: seven H4 sections, dense and skimmable, no title/metadata block
 line in the TA describes **how** we deliver those requirements inside this repo.
 
 - Every bullet should trace back to an AC line, a repo constraint (conventions, core protection,
-  a11y / contrast / perf rules), or an engineer-confirmed assumption. If you can't trace it, cut it.
+  a11y / contrast / perf rules), or an developer-confirmed assumption. If you can't trace it, cut it.
 - Scope beyond the AC lives in **Assumptions** (with a reason) — never quietly inside another section.
 - If the AC is ambiguous or incomplete, stop and flag it; don't invent scope to fill the gap.
 
@@ -32,7 +32,7 @@ they can infer. Don't restate how Shopify/CLI/Liquid work. No generic validation
 
 Write how a senior dev talks in a PR description — plain, direct, dense, no throat-clearing. Avoid
 AI-speak: no "first-class requirement", "honor X", "thoughtfully", motivational preambles, or
-moralizing. If a human engineer wouldn't say it out loud, cut it. Favour fragments over full
+moralizing. If a human developer wouldn't say it out loud, cut it. Favour fragments over full
 sentences where they read cleaner (e.g. "PDP only — cart/checkout → ELC-303.").
 
 ---
@@ -172,5 +172,5 @@ on the active SKU, else first allocation. On flattened parents ([ELC-70](url)) s
 ## When to update this file
 
 Update this reference when the Jira Technical Approach field structure changes, Domaine's playbook
-adds/removes/renames standard sections, or repeated engineer feedback surfaces a better pattern. Keep
+adds/removes/renames standard sections, or repeated developer feedback surfaces a better pattern. Keep
 edits in lockstep with the `write-technical-approach` skill so it always references the current format.

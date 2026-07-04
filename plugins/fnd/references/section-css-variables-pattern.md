@@ -197,7 +197,7 @@ Add these keys to `locales/en.default.schema.json`:
 
 To extend this pattern with a new property (e.g. `max-width`):
 
-1. **Section**: add setting, compute the CSS variable, append to `custom_style`
+1. **Section**: add setting, compute the CSS variable (plus its `-mobile` counterpart when the value differs per breakpoint), append to `custom_style`
 
    ```liquid
    assign section_style = section_style | append: ' --block-max-width: ' |
@@ -208,12 +208,12 @@ To extend this pattern with a new property (e.g. `max-width`):
 
    ```liquid
    assign ratio_classes = ratio_classes | append: '
-   max-w-(--block-max-width,none)'
+   max-w-(--block-max-width-mobile,none) md:max-w-(--block-max-width,none)'
    ```
 
-3. **Safelist**: add the new class to the safelist comment
+3. **Safelist**: add the new classes to the safelist comment
    ```
-   max-w-(--block-max-width,none) md:max-w-(--block-max-width,none)
+   max-w-(--block-max-width-mobile,none) md:max-w-(--block-max-width,none)
    ```
 
 ## Reference Implementation

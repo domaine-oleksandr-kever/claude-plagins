@@ -97,10 +97,10 @@ This was verified working — it's the source of the Step A table.
 4. Reuse the resolved IDs for the rest of the session.
 
 5. **If a resolved ID differs from the Step A table above (and you're on `meetdomaine`), alert the
-   Engineer:** e.g. _"`Steps to test` is now `customfield_10041`, not `10040` — want me to update
+   Developer:** e.g. _"`Steps to test` is now `customfield_10041`, not `10040` — want me to update
    the Step A table in `jira-custom-fields.md`? It can ride along with this task's other changes."_
    These IDs are shared site-wide, so fixing the table once spares every other workflow (and
-   engineer) from re-running discovery and burning time/tokens. Only edit on confirmation.
+   developer) from re-running discovery and burning time/tokens. Only edit on confirmation.
 
 > Tip: `fields: ["*all"]` can return a very large response. If your tooling truncates it, save the
 > result to a file and grep the `names` map for the labels rather than reading the whole payload.
@@ -214,7 +214,7 @@ Keep the per-field ID from the Step A table (resolve via Step B if it's not in t
 ## Fallback — Atlassian MCP unavailable
 
 If Atlassian MCP tool calls fail ("server does not exist") or Jira is not reachable without auth,
-ask the Engineer to paste into the thread: issue **summary**, **description**, **Acceptance
+ask the Developer to paste into the thread: issue **summary**, **description**, **Acceptance
 Criteria**, **Technical Approach**, and any linked issue keys. Unauthenticated HTTP/curl to
 `*.atlassian.net/browse/...` returns the SPA shell, not issue fields.
 
@@ -229,5 +229,4 @@ when in doubt. Update the Step A table by hand when:
 - You're targeting a **different Atlassian site** — those IDs differ, so document them separately
   rather than overwriting the meetdomaine table.
 
-Keep in lockstep with the command files that link here — the same "Living updates" convention the
-other references use.
+Keep in lockstep with the skills that link here.
