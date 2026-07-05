@@ -47,6 +47,12 @@ developer to re-run that same command (fast: the app is already installed). **Ne
 is interactive and hangs a non-TTY run. Mutations are auto-opted-in by the runner
 (`--allow-mutations`); the CLI blocks them otherwise.
 
+Browser-step troubleshooting: **HTTP 431** on the authorize URL = cookie bloat on
+`.myshopify.com` — have the developer open that same URL in an **incognito** window (log in
+there; the CLI keeps listening on its localhost callback, so the flow completes) or clear
+cookies for the store domain and retry. A "This store will be right back" page means a wrong
+or paused store domain.
+
 **Asking the developer to (re-)auth — short, with context.** The developer may not know this
 CLI 4.x flow exists, so never just say "auth expired". And don't interrupt at all if the runner
 already fell back to the token engine — the work isn't blocked; mention it at the next natural
@@ -83,7 +89,10 @@ ${CLAUDE_PLUGIN_ROOT}/scripts/shopify-admin-gql.sh --query docs/<TICKET>-inspect
 
 It tries `store execute` first (CLI ≥ 4.x), falls back to the token, takes the store domain from
 `shopify.theme.toml`'s `store=` line, keeps every credential out of context, and prints only the
-JSON response. Put each query/mutation in a `.graphql` file and pass it with `--query` (and
+JSON response. Both engines return the **same envelope** — `{"data":…}` on success, `{"errors":…}`
+on a GraphQL failure (exit 0, mirroring the Admin API's HTTP 200 + errors) — the runner
+wraps/unboxes `store execute`'s native output so responses read identically either way, and a
+GraphQL error never triggers the token fallback (double-execution risk for mutations). Put each query/mutation in a `.graphql` file and pass it with `--query` (and
 `--operation` when the file holds several named operations — for the store engine the runner
 extracts the named operation itself). If it exits with `error=no_admin_token`, **neither** engine
 is set up — its hint line names both fixes (add the token to `.env`, or the one-time

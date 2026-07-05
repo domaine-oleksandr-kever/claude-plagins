@@ -46,8 +46,14 @@
 #   --engine       auto (default) | store | token
 #
 # For the token engine the token is read from $SHOPIFY_ADMIN_TOKEN (already exported), else
-# from the --env file's SHOPIFY_ADMIN_TOKEN= line. Prints the raw JSON response to stdout
-# (the GraphQL envelope from curl; `store execute --json` output as-is). Exit non-zero on error.
+# from the --env file's SHOPIFY_ADMIN_TOKEN= line.
+#
+# Output contract (BOTH engines): stdout is the classic GraphQL envelope — {"data":…} on
+# success, {"errors":…} on a GraphQL-level failure — with exit 0 in both cases (mirrors the
+# Admin API's HTTP 200 + errors object). `store execute` natively prints BARE data and boxes
+# errors on stderr; the runner wraps/unboxes to keep one contract. Setup/transport errors
+# exit non-zero with error=… on stderr. GraphQL errors never trigger the token fallback —
+# re-running a mutation elsewhere could execute it twice.
 set -euo pipefail
 
 QUERY_FILE=""; OPERATION=""; VARIABLES=""; ENV_FILE=".env"; STORE=""; ENGINE="auto"
@@ -140,11 +146,27 @@ try_store_execute() {
   shopify "${args[@]}" >"$out" 2>"$err" || rc=$?
   [ -n "$tmpq" ] && rm -f "$tmpq"
   if [ "$rc" -eq 0 ]; then
-    cat "$out"; rm -f "$out" "$err"
+    # `store execute --json` prints BARE data (no {"data":…} envelope, unlike the Admin API
+    # itself) — wrap it so both engines return the classic envelope
+    jq -c '{data: .}' "$out" 2>/dev/null || cat "$out"
+    rm -f "$out" "$err"
     return 0
   fi
   if grep -q 'No stored app authentication found' "$err"; then
     SKIP_REASON="no stored store auth for $DOMAIN — one-time manual fix: shopify store auth --store $DOMAIN --scopes <comma-separated-scopes>"
+  elif grep -q 'GraphQL operation failed' "$err"; then
+    # a definitive GraphQL error, not an availability problem — do NOT fall back to the token
+    # engine (pointless for queries, double-execution risk for mutations). The CLI boxes the
+    # {"errors":…} JSON on stderr; unbox it and return the classic envelope on stdout with
+    # exit 0 — the same contract as the curl engine (HTTP 200 + errors object).
+    local unboxed
+    unboxed="$(jq -Rs -c 'gsub("[│\\n\\r]"; "") | match("\\{.*\\}").string | fromjson' "$err" 2>/dev/null || true)"
+    if [ -n "$unboxed" ]; then
+      printf '%s\n' "$unboxed"
+      rm -f "$out" "$err"
+      return 0
+    fi
+    SKIP_REASON="store execute: GraphQL operation failed, and the boxed error JSON could not be parsed: $(tr '\n' ' ' < "$err" | cut -c1-300)"
   else
     SKIP_REASON="store execute failed: $(tr '\n' ' ' < "$err" | sed -E 's/[[:space:]]+/ /g' | cut -c1-300)"
   fi
