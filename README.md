@@ -18,7 +18,7 @@ in its own subfolder under `plugins/`:
 │   └── fnd/                      # the Foundation plugin (self-contained)
 │       ├── .claude-plugin/
 │       │   └── plugin.json       # plugin manifest (+ bundled mcpServers)
-│       ├── skills/               # 17 workflow skills (see table below)
+│       ├── skills/               # 18 workflow skills (see table below)
 │       │   ├── develop-feature-or-fix/SKILL.md
 │       │   └── ...
 │       ├── agents/               # subagents the skills delegate to
@@ -65,6 +65,7 @@ To add another plugin later: create `plugins/<name>/` (with its own
 | `validate-brand-config-and-tokens`| `/fnd:validate-brand-config-and-tokens` |
 | `update-translations`             | `/fnd:update-translations` |
 | `update-schema-translations`      | `/fnd:update-schema-translations` |
+| `report-plugin-issue`             | `/fnd:report-plugin-issue` |
 
 Skills are also **auto-invoked**: Claude reads each skill's `description` and
 runs the relevant one when your request matches — you don't have to type the
@@ -261,6 +262,30 @@ The plugin declares the MCP servers the skills/agents use (`plugin.json` →
 
 > OAuth servers need a browser sign-in, so they're unavailable in headless/non-interactive
 > runs.
+
+## Permission design notes
+
+Two deliberate decisions, recorded so they don't read as omissions:
+
+- **The big workflow skills ship without `allowed-tools`.** `develop-feature-or-fix`,
+  `qa-feature-or-fix`, `write-steps-to-test`, and `pre-commit-review` orchestrate open-ended
+  work (editing, browser MCPs, subagents), so they run under the session's normal permission
+  flow instead of a frozen allowlist. The narrow utility skills (translations,
+  breaking-changes, preview themes, TA write-back) do declare tight allowlists.
+- **The reader agents ship without a `tools:` restriction.** `jira-reader` / `figma-reader`
+  must work whether the Atlassian/Figma MCP comes from this plugin or from the user's own
+  config (the MCP tool names differ per install scope), so they inherit the full toolset and
+  enforce read-only behaviour in their prompts instead. A wrong hardcoded MCP tool name would
+  break them silently.
+
+## Reporting plugin issues
+
+When an fnd component misbehaves — a bundled script crashes or prints a misleading `error=`, a
+converter mangles content, a skill contradicts what the tooling actually does — run
+`/fnd:report-plugin-issue`. It collects sanitized debug info (versions, exact command, output —
+**never tokens or secrets**), checks for duplicates, shows you the draft, and files a GitHub
+issue on this repo after you approve. A session-start hook also nudges Claude to propose it
+whenever it notices a plugin defect mid-task.
 
 ## License
 
