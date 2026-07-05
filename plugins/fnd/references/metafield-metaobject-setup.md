@@ -38,8 +38,17 @@ the store's **"install apps" permission**, which client stores often deny (then 
 
 ```bash
 shopify store auth --store <store>.myshopify.com \
-  --scopes read_products,write_products,read_metaobject_definitions,write_metaobject_definitions,read_metaobjects,write_metaobjects,read_files,write_files
+  --scopes read_products,write_products,read_metaobject_definitions,write_metaobject_definitions,read_metaobjects,write_metaobjects,read_files,write_files,read_themes,write_themes
 ```
+
+That list is the **full example** (metafields/metaobjects + products + files + themes — the
+`read_themes`/`write_themes` pair powers `theme-json.sh`, the customizer-state flow in
+`${CLAUDE_PLUGIN_ROOT}/references/theme-customizer-state.md`). **Don't hardcode it — agree the
+scope list with the developer first**: propose what the task actually needs and ask which level
+this store allows. On some stores (client/production especially) only the `read_*` scopes are
+appropriate — inspection still works fully; you just hand mutations to the developer (Mode 2)
+instead of running them. Prefer one auth that covers the whole task over asking twice, but never
+request `write_*` the developer didn't sign off on.
 
 The stored token **expires** — it's an online token: max **24 h**, sooner if the developer's
 admin session ends — so when the runner falls back reporting `no stored store auth`, ask the
@@ -67,14 +76,16 @@ a compact blurb like:
 >
 > A browser window will open — approve it there. It needs the store's **"Install apps"**
 > permission; if you don't have it, say so and we'll use `SHOPIFY_ADMIN_TOKEN` in `.env`
-> (or the GraphiQL flow) instead.
+> (or the GraphiQL flow) instead. And tell me if this store should stay **read-only** — then
+> I'll request only the `read_*` scopes and hand the mutations to you instead of running them.
 
 The `!` prefix runs the command inside the Claude Code session, so its output lands in the
 conversation. If the developer asks *you* to run it, run it in the foreground and tell them to
 complete the browser approval.
 
 **Engine 2 — Admin API access token.** `shpat_…`, with scopes
-`read/write_metaobject_definitions`, `read/write_metaobjects`, `read/write_products`. **This is
+`read/write_metaobject_definitions`, `read/write_metaobjects`, `read/write_products` (plus
+`read/write_themes` when the task touches theme JSON state). **This is
 NOT the Theme Access token (`shptka_`) in `shopify.theme.toml`** — that one only has `write_themes`
 and can't touch metaobjects. Get it from a **custom app** in the Shopify admin (Settings → Apps and
 sales channels → Develop apps → your app → API credentials → Admin API access token). It lives in

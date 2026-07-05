@@ -26,6 +26,10 @@ in its own subfolder under `plugins/`:
 │       │   ├── jira-reader.md       #  reads a ticket → structured fields
 │       │   ├── figma-reader.md      #  reads one Figma frame → build spec
 │       │   └── theme-explorer.md    #  scouts the theme → impact map
+│       ├── scripts/              # bundled runners the skills call
+│       │   ├── shopify-admin-gql.sh #  Admin GraphQL (store execute → token)
+│       │   ├── theme-json.sh        #  theme JSON / customizer state
+│       │   └── ...
 │       └── references/           # shared docs the skills read
 │           ├── jira-custom-fields.md
 │           ├── review-flow.md    #  shared contract for the review/marker flow
@@ -262,6 +266,18 @@ The plugin declares the MCP servers the skills/agents use (`plugin.json` →
 
 > OAuth servers need a browser sign-in, so they're unavailable in headless/non-interactive
 > runs.
+
+## Live store access
+
+Skills that need real store data call two bundled runners (`plugins/fnd/scripts/`):
+`shopify-admin-gql.sh` (Admin GraphQL — `shopify store execute` on CLI ≥ 4.x with stored
+`shopify store auth`, falling back to `SHOPIFY_ADMIN_TOKEN` from the project's gitignored
+`.env`) and `theme-json.sh` (reads/writes a theme's JSON content layer — the customizer state —
+hard-refuses writes to the live theme, and falls back to the project's Theme Access token when
+Admin API credentials are absent). A session-start hook tells Claude these exist, so it
+inspects real store state whenever that answers a question — research and debugging included,
+not just AC verification. Details: `plugins/fnd/references/metafield-metaobject-setup.md` and
+`plugins/fnd/references/theme-customizer-state.md`.
 
 ## Permission design notes
 

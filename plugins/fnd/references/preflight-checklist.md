@@ -19,8 +19,8 @@ above are read-only (the `preflight-checks` skill pre-approves exactly these); a
 command still needs the developer's go-ahead.
 
 Shopify CLI **≥ 4.x** additionally provides `shopify store execute` — the preferred engine for
-Admin GraphQL work (`metafield-metaobject-setup.md`): stored `shopify store auth`, no admin token
-in the repo. An older CLI is a 🟡, not a blocker — the bundled runner falls back to the
+Admin GraphQL work (`metafield-metaobject-setup.md`) and for theme-JSON/customizer state
+(`theme-customizer-state.md`): stored `shopify store auth`, no admin token in the repo. An older CLI is a 🟡, not a blocker — the bundled runner falls back to the
 `SHOPIFY_ADMIN_TOKEN` path automatically.
 
 ## MCP servers
