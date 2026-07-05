@@ -26,6 +26,10 @@ in its own subfolder under `plugins/`:
 │       │   ├── jira-reader.md       #  reads a ticket → structured fields
 │       │   ├── figma-reader.md      #  reads one Figma frame → build spec
 │       │   └── theme-explorer.md    #  scouts the theme → impact map
+│       ├── hooks/                # conventions injected at session/subagent start
+│       │   ├── comment-discipline.md
+│       │   ├── lean-code.md      #  "lazy senior dev" ladder (FND_LEAN=0 to disable)
+│       │   └── subagent-conventions.sh  # injects the above into code-writing subagents
 │       ├── scripts/              # bundled runners the skills call
 │       │   ├── shopify-admin-gql.sh #  Admin GraphQL (store execute → token)
 │       │   ├── theme-json.sh        #  theme JSON / customizer state
@@ -278,6 +282,19 @@ Admin API credentials are absent). A session-start hook tells Claude these exist
 inspects real store state whenever that answers a question — research and debugging included,
 not just AC verification. Details: `plugins/fnd/references/metafield-metaobject-setup.md` and
 `plugins/fnd/references/theme-customizer-state.md`.
+
+## Lean-code convention
+
+A session-start hook injects `hooks/lean-code.md` — a "lazy senior developer" discipline
+(idea adapted from [ponytail](https://github.com/DietrichGebert/ponytail)): before writing
+code, walk a reuse ladder (exists already? stdlib/Liquid built-in? Shopify-native? installed
+dependency? one line?) and only then write the minimum that works. Two fnd-specific
+guardrails: the ticket/AC defines *scope* (the ladder only governs *how* it's built), and
+explicit skill output contracts outrank it. A `SubagentStart` hook
+(`hooks/subagent-conventions.sh`) injects the same convention plus comment-discipline into
+code-writing subagents (general-purpose, workflow); read-only readers are skipped. Disable
+durably with `FND_LEAN=0` (project or global `settings.json` → `env`), or say
+"normal mode" to suspend it for the current session.
 
 ## Permission design notes
 
