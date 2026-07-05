@@ -12,42 +12,82 @@ Admin GraphQL API (pin the version the repo targets, e.g. `2026-04`). Every muta
 
 ## Two modes
 
-Pick based on whether you have an **Admin API token**:
+Pick based on whether you have **store API access** (either kind — see **Store access** below):
 
-- **Mode 1 — admin token available.** Run the inspection query **and** all mutations yourself via
-  the bundled runner `${CLAUDE_PLUGIN_ROOT}/scripts/shopify-admin-gql.sh` (see **Token & store**
-  below). Drive it end to end: inspect → diff → create → mock → bind → report the resulting gids
-  and final state. **Treat the token exactly like the Theme Access token — never print it, never
-  echo it into context**; the runner consumes it inside the request header only.
-- **Mode 2 — no token.** Produce a **single living `.graphql` file** the developer runs by hand in
+- **Mode 1 — store access available** (CLI ≥ 4.x stored `shopify store auth`, **or** an Admin API
+  token). Run the inspection query **and** all mutations yourself via the bundled runner
+  `${CLAUDE_PLUGIN_ROOT}/scripts/shopify-admin-gql.sh` — it picks the engine automatically
+  (`store execute` first, token fallback). Drive it end to end: inspect → diff → create → mock →
+  bind → report the resulting gids and final state. **Never print or `Read` any secret** (`.env`,
+  `shopify.theme.toml`); the runner consumes credentials without exposing them.
+- **Mode 2 — no store access.** Produce a **single living `.graphql` file** the developer runs by hand in
   the **Shopify GraphiQL App** (Shopify admin → Apps → *Shopify GraphiQL App*). Hand them **one
   step at a time**; they paste back the JSON result, you read the returned **gid**, fill it into
   the next step, mark the step done, and advance. The file is the source of truth and the run log.
 
 Either way the **step skeleton is identical** — only who-runs-it differs.
 
-## Token & store (Mode 1)
+## Store access (Mode 1)
 
-The metaobject/metafield mutations need an **Admin API access token** — `shpat_…`, with scopes
+The runner supports two engines and picks one automatically (`--engine auto|store|token`):
+
+**Engine 1 — `shopify store execute` (preferred; Shopify CLI ≥ 4.x).** No token in the repo at
+all: a one-time `shopify store auth` installs a Shopify-managed OAuth app on the store and caches
+an **online** access token. Setup is a **manual developer step** — it opens a browser and requires
+the store's **"install apps" permission**, which client stores often deny (then use Engine 2):
+
+```bash
+shopify store auth --store <store>.myshopify.com \
+  --scopes read_products,write_products,read_metaobject_definitions,write_metaobject_definitions,read_metaobjects,write_metaobjects,read_files,write_files
+```
+
+The stored token **expires** — it's an online token: max **24 h**, sooner if the developer's
+admin session ends — so when the runner falls back reporting `no stored store auth`, ask the
+developer to re-run that same command (fast: the app is already installed). **Never run `store auth` from a script or skill** — it
+is interactive and hangs a non-TTY run. Mutations are auto-opted-in by the runner
+(`--allow-mutations`); the CLI blocks them otherwise.
+
+**Asking the developer to (re-)auth — short, with context.** The developer may not know this
+CLI 4.x flow exists, so never just say "auth expired". And don't interrupt at all if the runner
+already fell back to the token engine — the work isn't blocked; mention it at the next natural
+pause. When you ARE blocked (neither engine set up) or want the preferred engine back, ask with
+a compact blurb like:
+
+> Store auth for `<domain>` is missing/expired — it's an online token (max 24 h, dies with your
+> admin session). One command restores it; it's the Shopify CLI 4.x flow that installs a
+> Shopify-managed app on the store, so no token ever lands in the repo. Run it right here:
+>
+> `! shopify store auth --store <domain> --scopes <scopes the task needs>`
+>
+> A browser window will open — approve it there. It needs the store's **"Install apps"**
+> permission; if you don't have it, say so and we'll use `SHOPIFY_ADMIN_TOKEN` in `.env`
+> (or the GraphiQL flow) instead.
+
+The `!` prefix runs the command inside the Claude Code session, so its output lands in the
+conversation. If the developer asks *you* to run it, run it in the foreground and tell them to
+complete the browser approval.
+
+**Engine 2 — Admin API access token.** `shpat_…`, with scopes
 `read/write_metaobject_definitions`, `read/write_metaobjects`, `read/write_products`. **This is
 NOT the Theme Access token (`shptka_`) in `shopify.theme.toml`** — that one only has `write_themes`
-and can't touch metaobjects. Get the admin token from a **custom app** in the Shopify admin
-(Settings → Apps and sales channels → Develop apps → your app → API credentials → Admin API access
-token).
+and can't touch metaobjects. Get it from a **custom app** in the Shopify admin (Settings → Apps and
+sales channels → Develop apps → your app → API credentials → Admin API access token). It lives in
+the repo's **gitignored `.env`** as **`SHOPIFY_ADMIN_TOKEN=shpat_…`** (alongside the existing
+`BRAND` / `FIGMA_TOKEN`). **Never `Read` `.env` yourself** — that pulls the secret into context.
 
-Where it lives: the repo's **gitignored `.env`**, as **`SHOPIFY_ADMIN_TOKEN=shpat_…`**. (If the dev
-hasn't added it yet, ask them to put that line in `.env` — alongside the existing `BRAND` /
-`FIGMA_TOKEN`.) **Never `Read` `.env` yourself** — that pulls the secret into context. Instead run:
+Either way, run everything through the runner:
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/scripts/shopify-admin-gql.sh --query docs/<TICKET>-inspection.graphql [--operation <Name>]
 ```
 
-The runner reads `SHOPIFY_ADMIN_TOKEN` straight from `.env` into the request header (never printed),
-takes the store domain from `shopify.theme.toml`'s `store=` line, and prints only the JSON response.
-Put each query/mutation in a `.graphql` file and pass it with `--query` (and `--operation` when the
-file holds several named operations). If the runner prints `error=no_admin_token`, the token isn't
-set — tell the dev to add it to `.env`, or fall back to **Mode 2**.
+It tries `store execute` first (CLI ≥ 4.x), falls back to the token, takes the store domain from
+`shopify.theme.toml`'s `store=` line, keeps every credential out of context, and prints only the
+JSON response. Put each query/mutation in a `.graphql` file and pass it with `--query` (and
+`--operation` when the file holds several named operations — for the store engine the runner
+extracts the named operation itself). If it exits with `error=no_admin_token`, **neither** engine
+is set up — its hint line names both fixes (add the token to `.env`, or the one-time
+`shopify store auth`); relay them to the developer, or fall back to **Mode 2**.
 
 ## Step skeleton (dependency order)
 
@@ -108,7 +148,7 @@ Write it to `docs/<TICKET-KEY>-metaobject-setup.graphql` (and, if useful, a comp
 
 ## Verifying data-driven Acceptance Criteria (mutate to test)
 
-When you have the admin token and provisioned the data yourself (Mode 1), many AC are **conditional
+When you have store access and provisioned the data yourself (Mode 1), many AC are **conditional
 on the metafield/metaobject value** — one default render doesn't prove them. Drive each state with
 a mutation, verify, then restore:
 
