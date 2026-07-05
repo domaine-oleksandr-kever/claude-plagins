@@ -19,8 +19,9 @@ data, not chatter or preamble.
   - `conformance` → lead with check **E** (blockers first), plus a light A/C sweep.
 - Optionally, **raw hits to confirm** (task-number grep hits, untracked-file candidates).
 
-Gather what you need with your own tools (`git diff <base>...HEAD -- <file>`, `Read`,
-`Grep`). Do not assume context from the main conversation — you start fresh.
+Gather what you need with your own tools (`git diff "$(git merge-base <base> HEAD)" -- <file>`
+— merge-base to the working tree, so staged/unstaged edits count too — `Read`, `Grep`).
+Do not assume context from the main conversation — you start fresh.
 
 ## What to check
 

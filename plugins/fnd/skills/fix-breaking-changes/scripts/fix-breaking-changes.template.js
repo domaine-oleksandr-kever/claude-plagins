@@ -6,14 +6,18 @@
  * `applyFixes` function below based on the patterns documented in `breaking-changes.md`.
  * Run with `node scripts/fix-breaking-changes.js`, verify with theme check, then delete the copy.
  *
- * It walks every JSON file in `templates/` plus `config/settings_data.json`, applies `applyFixes`
- * recursively, and writes the result back — preserving template comment headers and 2-space JSON.
+ * It walks every JSON file under `templates/` — including subfolders like `templates/customers/`
+ * and `templates/metaobject/` — plus `config/settings_data.json`, applies `applyFixes` recursively,
+ * and writes the result back, preserving template comment headers and 2-space JSON. Exits non-zero
+ * if any file failed, so a broken JSON can't hide behind the final banner.
  */
 const fs = require('fs')
 const path = require('path')
 
 const templatesDir = './templates'
 const configFile = './config/settings_data.json'
+
+let errorCount = 0
 
 // ========================================
 // CUSTOMIZE THIS SECTION BASED ON breaking-changes.md
@@ -66,9 +70,10 @@ const processTemplateFile = (filePath) => {
 
     const processed = applyFixes(JSON.parse(jsonContent))
     const json = JSON.stringify(processed, null, 2)
-    fs.writeFileSync(filePath, comment ? `${comment}\n${json}` : json)
+    fs.writeFileSync(filePath, (comment ? `${comment}\n${json}` : json) + '\n')
     console.log(`✓ Updated ${filePath}`)
   } catch (error) {
+    errorCount++
     console.error(`Error processing ${filePath}:`, error.message)
   }
 }
@@ -77,20 +82,31 @@ const processConfigFile = (filePath) => {
   try {
     console.log(`Processing ${filePath}...`)
     const processed = applyFixes(JSON.parse(fs.readFileSync(filePath, 'utf8')))
-    fs.writeFileSync(filePath, JSON.stringify(processed, null, 2))
+    fs.writeFileSync(filePath, JSON.stringify(processed, null, 2) + '\n')
     console.log(`✓ Updated ${filePath}`)
   } catch (error) {
+    errorCount++
     console.error(`Error processing ${filePath}:`, error.message)
   }
+}
+
+const walkJsonFiles = (dir) => {
+  const out = []
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const p = path.join(dir, entry.name)
+    if (entry.isDirectory()) out.push(...walkJsonFiles(p))
+    else if (entry.name.endsWith('.json')) out.push(p)
+  }
+  return out
 }
 
 const main = () => {
   console.log('🔧 Fixing breaking changes in template files and config...\n')
 
-  const jsonFiles = fs.readdirSync(templatesDir).filter((f) => f.endsWith('.json'))
+  const jsonFiles = fs.existsSync(templatesDir) ? walkJsonFiles(templatesDir) : []
   if (jsonFiles.length > 0) {
     console.log(`Found ${jsonFiles.length} template files to process:\n`)
-    jsonFiles.forEach((f) => processTemplateFile(path.join(templatesDir, f)))
+    jsonFiles.forEach((f) => processTemplateFile(f))
   } else {
     console.log('No JSON template files found.')
   }
@@ -102,7 +118,12 @@ const main = () => {
     console.log(`\nConfig file not found: ${configFile}`)
   }
 
-  console.log('\n✅ All template files and config have been processed!')
+  if (errorCount > 0) {
+    console.error(`\n⚠️  Finished with ${errorCount} error(s) — the file(s) that failed above were NOT updated.`)
+    process.exitCode = 1
+  } else {
+    console.log('\n✅ All template files and config have been processed!')
+  }
   console.log('Next: run theme check to verify fixes')
 }
 

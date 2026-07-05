@@ -25,7 +25,7 @@
  * the heaviest construct (every cell wraps a paragraph). The script also prints a size warning
  * to stderr when the ADF is large, so you trim/restructure instead of shipping a fragile blob.
  *
- * Supported: headings (#..######), paragraphs, **bold**, *italic*, `inline code`,
+ * Supported: headings (#..######), paragraphs, **bold**, *italic*, ***bold-italic***, `inline code`,
  * [links](url), ~~strike~~, bullet/ordered lists, ``` fenced code blocks ```,
  * --- horizontal rules, > blockquotes, and GFM pipe tables. Underscore emphasis
  * (_x_/__x__) is intentionally NOT treated as italics/bold so snake_case identifiers
@@ -64,11 +64,12 @@ function inlineNodes(input) {
   const out = [];
   const push = (s) => { const n = textNode(s); if (n) out.push(n); };
   const patterns = [
-    { kind: 'code',   re: /`([^`]+)`/ },
-    { kind: 'link',   re: /\[([^\]]+)\]\(([^)\s]+)\)/ },
-    { kind: 'strong', re: /\*\*([^*]+)\*\*/ },
-    { kind: 'em',     re: /\*([^*]+)\*/ },
-    { kind: 'strike', re: /~~([^~]+)~~/ },
+    { kind: 'code',     re: /`([^`]+)`/ },
+    { kind: 'link',     re: /\[([^\]]+)\]\(([^)\s]+)\)/ },
+    { kind: 'strongem', re: /\*\*\*([^*]+)\*\*\*/ },
+    { kind: 'strong',   re: /\*\*([^*]+)\*\*/ },
+    { kind: 'em',       re: /\*([^*]+)\*/ },
+    { kind: 'strike',   re: /~~([^~]+)~~/ },
   ];
   let rest = input;
   while (rest.length) {
@@ -82,6 +83,7 @@ function inlineNodes(input) {
     const { p, m } = best;
     if (p.kind === 'code') out.push(textNode(m[1], [{ type: 'code' }]));
     else if (p.kind === 'link') out.push(textNode(m[1], [{ type: 'link', attrs: { href: m[2] } }]));
+    else if (p.kind === 'strongem') out.push(textNode(m[1], [{ type: 'strong' }, { type: 'em' }]));
     else if (p.kind === 'strong') out.push(textNode(m[1], [{ type: 'strong' }]));
     else if (p.kind === 'em') out.push(textNode(m[1], [{ type: 'em' }]));
     else if (p.kind === 'strike') out.push(textNode(m[1], [{ type: 'strike' }]));
@@ -134,8 +136,9 @@ function toADF(md) {
     // horizontal rule
     if (/^(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) { content.push({ type: 'rule' }); i++; continue; }
 
-    // GFM table: this row has a pipe and the next row is a separator (---|---)
-    if (/\|/.test(line) && i + 1 < lines.length && /^\s*\|?[\s:]*-{1,}[-\s:|]*$/.test(lines[i + 1])) {
+    // GFM table: this row has a pipe and the next row is a separator (---|---).
+    // The separator must itself contain a pipe — a bare `---` under prose is a rule, not a table.
+    if (/\|/.test(line) && i + 1 < lines.length && /\|/.test(lines[i + 1]) && /^\s*\|?[\s:]*-{1,}[-\s:|]*$/.test(lines[i + 1])) {
       const header = cellsOf(line);
       i += 2; // header + separator
       const dataRows = [];
@@ -143,6 +146,10 @@ function toADF(md) {
         dataRows.push(cellsOf(lines[i]));
         i++;
       }
+      // ADF tables must be rectangular — pad ragged rows (and a short header) with empty cells
+      const width = Math.max(header.length, ...dataRows.map((r) => r.length));
+      while (header.length < width) header.push('');
+      for (const r of dataRows) while (r.length < width) r.push('');
       if (OPT.noTables) {
         // Compact form: one bullet per data row, "Header: cell · Header: cell".
         // ADF table nodes are the heaviest construct; this keeps the field small and robust.
@@ -187,13 +194,16 @@ function toADF(md) {
     const ordered = /^\s*\d+\.\s+/.test(line);
     if (ordered || /^\s*([-*+])\s+/.test(line)) {
       const itemRe = ordered ? /^\s*\d+\.\s+(.*)$/ : /^\s*[-*+]\s+(.*)$/;
+      const start = ordered ? parseInt(/^\s*(\d+)\./.exec(line)[1], 10) : 1;
       const items = [];
       while (i < lines.length && itemRe.test(lines[i])) {
         const m = itemRe.exec(lines[i]);
         items.push({ type: 'listItem', content: [para(inlineNodes(m[1].trim()))] });
         i++;
       }
-      content.push({ type: ordered ? 'orderedList' : 'bulletList', content: items });
+      const list = { type: ordered ? 'orderedList' : 'bulletList', content: items };
+      if (ordered && start !== 1) list.attrs = { order: start }; // preserve lists starting at e.g. "3."
+      content.push(list);
       continue;
     }
 

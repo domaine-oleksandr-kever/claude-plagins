@@ -22,18 +22,23 @@
 #   - dev theme id : the UNCOMMENTED `theme = "..."` line (commented variants ignored)
 #   - store        : the UNCOMMENTED `store = "..."` line
 #   - token        : `password = "..."`, else first shp*_… token in the file
+#   NB: the FIRST uncommented match wins — in a multi-environment toml ([environments.*])
+#   that is the first environment listed; point TOML_PATH at a single-env file to override.
 #
 # Subcommands:
 #   info
 #       → store=… dev_theme_id=… dev_theme_name=…                       (no mutation)
-#   create --name "<NAME>" [--reuse] [--no-build] [--build-cmd "<cmd>"]
+#   create --name "<NAME>" [--reuse] [--no-build] [--build-cmd "<cmd>"] [--ignore-extra "<glob>"]
 #       → build repo → push code (settings ignored) to a new unpublished theme
 #         (or an existing same-named one with --reuse) → overlay dev-theme settings
 #       → theme_id=… name=… store=… preview_url=… editor_url=… reused=… built=…
-#   refresh --theme <ID> [--no-build] [--build-cmd "<cmd>"]
+#   refresh --theme <ID> [--no-build] [--build-cmd "<cmd>"] [--ignore-extra "<glob>"]
 #       → build repo → push CODE ONLY to <ID>, leaving its customizer settings intact
 #         (reuse this when a preview theme's code broke and needs a redeploy)
 #       → theme_id=… store=… preview_url=… editor_url=… built=…
+#
+#   --ignore-extra "<glob>"  (create & refresh, repeatable) — extra `--ignore` pattern passed
+#       through to `shopify theme push`, for a file inside a theme dir that must not ship.
 #
 # Output is `key=value` lines on stdout. Errors print `error=<reason>` and exit non-zero.
 # Requires: shopify CLI, jq; npm for the default build.
@@ -60,6 +65,9 @@ SETTINGS_PATTERNS=(
 THEME_DIRS=( assets blocks config layout locales sections snippets templates )
 
 fail() { printf 'error=%s\n' "$1"; exit 1; }
+# a flag that takes a value must not be the last arg — a bare `shift 2` past the end of $@
+# kills the whole script silently under `set -e`, with no error= line for the caller
+need_val() { [ "$1" -ge 2 ] || fail "missing value for $2"; }
 
 command -v shopify >/dev/null 2>&1 || fail "shopify CLI not found on PATH"
 command -v jq >/dev/null 2>&1 || fail "jq not found on PATH (install: brew install jq)"
@@ -213,11 +221,11 @@ case "$MODE" in
     NAME=""; REUSE=0
     while [ $# -gt 0 ]; do
       case "$1" in
-        --name) NAME="${2:-}"; shift 2 ;;
+        --name) need_val $# "$1"; NAME="$2"; shift 2 ;;
         --reuse) REUSE=1; shift ;;
         --no-build) NO_BUILD=1; shift ;;
-        --build-cmd) BUILD_CMD="${2:-}"; shift 2 ;;
-        --ignore-extra) EXTRA_IGN+=(--ignore "${2:-}"); shift 2 ;;
+        --build-cmd) need_val $# "$1"; BUILD_CMD="$2"; shift 2 ;;
+        --ignore-extra) need_val $# "$1"; EXTRA_IGN+=(--ignore "$2"); shift 2 ;;
         *) fail "unknown arg: $1" ;;
       esac
     done
@@ -267,10 +275,10 @@ case "$MODE" in
     TARGET=""
     while [ $# -gt 0 ]; do
       case "$1" in
-        --theme) TARGET="${2:-}"; shift 2 ;;
+        --theme) need_val $# "$1"; TARGET="$2"; shift 2 ;;
         --no-build) NO_BUILD=1; shift ;;
-        --build-cmd) BUILD_CMD="${2:-}"; shift 2 ;;
-        --ignore-extra) EXTRA_IGN+=(--ignore "${2:-}"); shift 2 ;;
+        --build-cmd) need_val $# "$1"; BUILD_CMD="$2"; shift 2 ;;
+        --ignore-extra) need_val $# "$1"; EXTRA_IGN+=(--ignore "$2"); shift 2 ;;
         *) fail "unknown arg: $1" ;;
       esac
     done
@@ -293,6 +301,6 @@ case "$MODE" in
     ;;
 
   *)
-    fail "usage: create-preview-theme.sh info | create --name \"<name>\" [--reuse] [--no-build] [--build-cmd \"<cmd>\"] | refresh --theme <id> [--no-build] [--build-cmd \"<cmd>\"]"
+    fail "usage: create-preview-theme.sh info | create --name \"<name>\" [--reuse] [--no-build] [--build-cmd \"<cmd>\"] [--ignore-extra \"<glob>\"] | refresh --theme <id> [--no-build] [--build-cmd \"<cmd>\"] [--ignore-extra \"<glob>\"]"
     ;;
 esac

@@ -24,14 +24,19 @@ After the pass is applied (step 4), **write/refresh the marker**.
 
 ## 1. Determine scope
 
-Diff the branch against **`develop` if it exists, else `main`**:
+Diff against **`develop` if it exists (local, else `origin/develop`), else `main`** — from the
+merge-base to the **working tree**, so committed, staged, and not-yet-staged work all land in
+scope (this review runs *before* the commit):
 
 ```bash
-base=$(git show-ref --verify --quiet refs/heads/develop && echo develop || echo main)
-git diff --name-only "$base"...HEAD
+base=$(git show-ref --verify --quiet refs/heads/develop && echo develop \
+  || { git show-ref --verify --quiet refs/remotes/origin/develop && echo origin/develop || echo main; })
+mb=$(git merge-base "$base" HEAD)
+git diff --name-only "$mb"
 ```
 
-Review **only these files**. Read each one (the diff + enough surrounding code to judge comments).
+Review **only these files** (untracked new files surface via check D). Read each one (the diff +
+enough surrounding code to judge comments).
 
 ## 2. Run the four checks
 
@@ -63,7 +68,7 @@ For every changed file, inspect each comment — Liquid (`{% comment %}`, `{%- c
   (`S3HT11`), design/URL references, and tech acronyms that happen to match the pattern
   (`UTF-8`, `SHA-256`, `ISO-8601`) — those aren't ticket references. First-pass signal:
   ```bash
-  git diff "$base"...HEAD | grep -nE '^\+' \
+  git diff "$mb" | grep -nE '^\+' \
     | grep -nE '\b[A-Z]{2,}-[0-9]+\b|\((AC|TA)[^)]*\)|\b(AC|TA) [0-9]+[a-z]?\b|Acceptance Criteria|Technical Approach|Steps to Test'
   ```
   then confirm each hit is inside a **comment** (not code/data) before flagging — a real
@@ -111,7 +116,7 @@ reflects the post-edit state — see `${CLAUDE_PLUGIN_ROOT}/references/review-fl
 
 ```bash
 branch=$(git rev-parse --abbrev-ref HEAD)
-diff_hash=$( { git diff "$base"...HEAD; git diff; } | git hash-object --stdin )
+diff_hash=$(git diff "$(git merge-base "$base" HEAD)" | git hash-object --stdin)
 { echo "branch=$branch"; echo "base=$base"; echo "diff_hash=$diff_hash"; \
   echo "reviewed_at_head=$(git rev-parse HEAD)"; } > .git/.fnd-review
 ```

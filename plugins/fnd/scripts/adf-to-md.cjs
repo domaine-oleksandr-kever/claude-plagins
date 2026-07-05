@@ -20,7 +20,14 @@ const fs = require('fs');
 
 function readJSON() {
   const args = process.argv.slice(2);
-  const fileArg = args.find((a) => !a.startsWith('--'));
+  const fi = args.indexOf('--field');
+  const fieldId = fi !== -1 && args[fi + 1] && !args[fi + 1].startsWith('--') ? args[fi + 1] : null;
+  if (fi !== -1 && !fieldId) {
+    process.stderr.write('adf-to-md: --field needs a value (e.g. --field customfield_10038)\n');
+    process.exit(1);
+  }
+  // skip the --field VALUE when looking for the input file arg
+  const fileArg = args.find((a, i) => !a.startsWith('--') && (fi === -1 || i !== fi + 1));
   let raw;
   try {
     raw = fileArg ? fs.readFileSync(fileArg, 'utf8') : fs.readFileSync(0, 'utf8');
@@ -33,10 +40,20 @@ function readJSON() {
     process.stderr.write('adf-to-md: input is not valid JSON: ' + e.message + '\n');
     process.exit(1);
   }
-  const fi = args.indexOf('--field');
-  if (fi !== -1 && args[fi + 1]) {
-    const id = args[fi + 1];
-    data = (data.fields && data.fields[id]) || data[id] || data;
+  if (fieldId) {
+    const has = (o, k) => o && typeof o === 'object' && Object.prototype.hasOwnProperty.call(o, k);
+    if (!has(data.fields, fieldId) && !has(data, fieldId)) {
+      process.stderr.write('adf-to-md: field ' + fieldId + ' not present in input\n');
+      process.exit(1);
+    }
+    const val = has(data.fields, fieldId) ? data.fields[fieldId] : data[fieldId];
+    if (val == null) {
+      // genuinely empty field → empty output, never a fallback to another field or the whole doc
+      process.stderr.write('adf-to-md: field ' + fieldId + ' is empty\n');
+      process.exit(0);
+    }
+    if (typeof val === 'string') { process.stdout.write(val + '\n'); process.exit(0); }
+    data = val;
   }
   return data;
 }
@@ -75,6 +92,7 @@ function cardUrl(node) {
 function inline(nodes) {
   if (!Array.isArray(nodes)) return '';
   return nodes.map((n) => {
+    if (!n || typeof n !== 'object') return '';
     if (n.type === 'text') return renderText(n);
     if (n.type === 'hardBreak') return '\n';
     if (n.type === 'emoji') return (n.attrs && (n.attrs.shortName || n.attrs.text)) || '';
@@ -95,9 +113,11 @@ function listItemText(item) {
 
 function renderBlock(node, depth) {
   depth = depth || 0;
+  if (!node || typeof node !== 'object') return '';
   switch (node.type) {
     case 'heading': {
-      const lvl = (node.attrs && node.attrs.level) || 1;
+      // markdown has no level > 6; clamp instead of emitting `#########`
+      const lvl = Math.min(Math.max((node.attrs && node.attrs.level) || 1, 1), 6);
       return '#'.repeat(lvl) + ' ' + inline(node.content);
     }
     case 'paragraph':
@@ -120,7 +140,9 @@ function renderBlock(node, depth) {
     case 'table': {
       const rows = node.content || [];
       if (!rows.length) return '';
-      const cellsOf = (row) => (row.content || []).map((c) => inline((c.content && c.content[0] && c.content[0].content) || []).replace(/\n/g, ' ').trim());
+      // render EVERY block of a cell (a Jira cell can hold several paragraphs / a list)
+      const cellsOf = (row) => (row.content || []).map((c) =>
+        (c.content || []).map((b) => renderBlock(b, depth + 1)).join(' ').replace(/\n/g, ' ').trim());
       const out = [];
       const head = cellsOf(rows[0]);
       out.push('| ' + head.join(' | ') + ' |');

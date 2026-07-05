@@ -13,7 +13,7 @@ argument-hint: "<brand-slug> (e.g. estee-lauder, mac)"
 arguments:
   - name: brand_slug
     description: Brand slug to validate (e.g. `estee-lauder`, `mac`). MANDATORY — ask first if missing.
-allowed-tools: Read, Glob, Grep, Bash(npx vite build*)
+allowed-tools: Read, Glob, Grep, Bash(npx vite build*), Bash(BRAND=* npx vite build*)
 ---
 
 # Validate Brand Config and CSS Tokens

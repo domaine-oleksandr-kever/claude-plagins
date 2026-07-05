@@ -6,7 +6,7 @@ description: >
   when the user asks to fix / apply breaking changes, migrate templates after a major version bump, or
   invokes /fix-breaking-changes. Pairs with get-breaking-changes (which produces the report).
 argument-hint: "(reads breaking-changes.md from the project root)"
-allowed-tools: Read, Edit, Grep, Glob, Bash(cp*), Bash(node scripts/fix-breaking-changes.js), Bash(shopify theme check*), Bash(rm scripts/fix-breaking-changes.js)
+allowed-tools: Read, Edit, Grep, Glob, Bash(mkdir -p scripts), Bash(cp ${CLAUDE_PLUGIN_ROOT}/skills/fix-breaking-changes/scripts/fix-breaking-changes.template.js scripts/fix-breaking-changes.js), Bash(node scripts/fix-breaking-changes.js), Bash(shopify theme check*), Bash(rm scripts/fix-breaking-changes.js)
 ---
 
 # Fix Breaking Changes
@@ -18,8 +18,9 @@ Apply the fixes documented in `breaking-changes.md` to `templates/*.json` and `c
 ## Process
 
 1. **Read `breaking-changes.md`** — identify what to change: settings to remove, block types to rename, property values to update, context changes (e.g. `{{ closest.product }}` vs explicit settings).
-2. **Copy the bundled script template** into the repo:
+2. **Copy the bundled script template** into the repo (`scripts/` may not exist yet):
    ```bash
+   mkdir -p scripts
    cp ${CLAUDE_PLUGIN_ROOT}/skills/fix-breaking-changes/scripts/fix-breaking-changes.template.js scripts/fix-breaking-changes.js
    ```
 3. **Customize `applyFixes`** in `scripts/fix-breaking-changes.js` — uncomment/adapt the relevant patterns:

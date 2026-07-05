@@ -9,7 +9,7 @@ argument-hint: "(describe the English keys/strings to translate)"
 arguments:
   - name: strings
     description: The English keys/strings to translate (or a pointer to where they live). Used to build sourceStructure.
-allowed-tools: Read, Glob, Write, Bash(ls locales/*.json), Bash(node scripts/update-translations.js)
+allowed-tools: Read, Glob, Write, Bash(node scripts/update-translations.js)
 ---
 
 # Update Storefront Translations
@@ -30,11 +30,9 @@ Create `scripts/translation-data.json` with two top-level keys:
 }
 ```
 
-Get the target language codes:
-
-```bash
-ls locales/*.json | grep -v schema | grep -v en.default.json | sed 's|locales/||g' | sed 's|\.json||g'
-```
+Get the target language codes with **Glob** (`locales/*.json`): take each basename, drop the
+`.json` suffix, and skip `en.default.json` plus every `*.schema.json` — what remains are the
+language codes (e.g. `fr`, `es`, `de`).
 
 In `wordTranslations`, mirror `sourceStructure` exactly, but make **each leaf value an object of `{ "<lang>": "<translation>" }`** for every language code:
 

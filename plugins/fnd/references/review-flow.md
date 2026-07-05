@@ -28,10 +28,16 @@ Compute scope + hash:
 
 ```bash
 branch=$(git rev-parse --abbrev-ref HEAD)
-base=$(git show-ref --verify --quiet refs/heads/develop && echo develop || echo main)
-# include committed-vs-base AND working-tree changes (pre-commit runs before the commit):
-diff_hash=$( { git diff "$base"...HEAD; git diff; } | git hash-object --stdin )
+base=$(git show-ref --verify --quiet refs/heads/develop && echo develop \
+  || { git show-ref --verify --quiet refs/remotes/origin/develop && echo origin/develop || echo main; })
+# ONE diff from the branch point to the WORKING TREE — covers committed, staged, and unstaged
+# changes alike (a { base...HEAD; git diff; } pair would miss staged-but-uncommitted edits):
+mb=$(git merge-base "$base" HEAD)
+diff_hash=$(git diff "$mb" | git hash-object --stdin)
 ```
+
+> Markers written by plugin ≤ 0.18 used a different hash formula, so the first run after
+> upgrading reports "changed since last review" once — expected; pick re-review or skip as usual.
 
 Read it:
 
@@ -65,8 +71,8 @@ The cost is **reading the changed files**, which checks A and C (and E) share. S
   (`(AC 1a)`, `(TA 1a)`, "Acceptance Criteria", "Technical Approach", "Steps to Test"):
 
   ```bash
-  git diff "$base"...HEAD | grep -nE '^\+' \
-    | grep -nE '\b[A-Z]{2,}-[0-9]+\b|\((AC|TA)[^)]*\)|\b(AC|TA) [0-9]+[a-z]?\b|Acceptance Criteria|Technical Approach|Steps to Test'   # B candidates
+  git diff "$(git merge-base "$base" HEAD)" | grep -nE '^\+' \
+    | grep -nE '\b[A-Z]{2,}-[0-9]+\b|\((AC|TA)[^)]*\)|\b(AC|TA) [0-9]+[a-z]?\b|Acceptance Criteria|Technical Approach|Steps to Test'   # B candidates (incl. staged + unstaged)
   git status --porcelain | grep '^??'                                          # D candidates
   ```
 
@@ -97,11 +103,11 @@ When asking (subsequent runs), enrich the prompt so the decision is easy:
 
 - Compare `diff_hash` to `prev_hash`. If **unchanged**, say *"nothing changed since the
   last review"* and recommend **skip**. If **changed**, summarize what changed since the
-  last review — `git diff <prev_head>...HEAD` (+ working tree), which files, rough nature
-  (comments/style vs. logic):
+  last review — `git diff <prev_head>` covers commits since then plus staged and unstaged
+  work in one go — which files, rough nature (comments/style vs. logic):
 
   ```bash
-  git diff "$prev_head"...HEAD --stat ; git diff --stat
+  git diff "$prev_head" --stat
   ```
 
 - Offer: **`[ full re-review ] / [ only the changed files ] / [ skip ]`**.

@@ -3,12 +3,15 @@
 #
 # Mirrors the create-preview-theme.sh token discipline: the Admin API access token
 # (shpat_…, scopes like write_metaobjects / write_products) is read straight from the repo's
-# gitignored .env into this subprocess and used ONLY in the request header — it is NEVER printed
-# and NEVER returned to the caller. Skills must therefore call THIS script and must NOT `Read`
+# gitignored .env into this subprocess and used ONLY in the request header — it is NEVER printed,
+# NEVER returned to the caller, and never on the curl argv (it goes through a private 0600 curl
+# config file that is removed on exit, so `ps` can't see it). Skills must therefore call THIS
+# script and must NOT `Read`
 # the .env file themselves (that would pull the secret into context).
 #
-# The store domain comes from shopify.theme.toml's uncommented `store=` line (same as the preview
-# script) unless overridden. The Theme Access token (shptka_) in shopify.theme.toml is NOT an admin
+# The store domain comes from shopify.theme.toml's FIRST uncommented `store=` line — the same
+# pick as create-preview-theme.sh, which matters when a multi-environment toml lists several —
+# unless overridden. The Theme Access token (shptka_) in shopify.theme.toml is NOT an admin
 # token and is intentionally not used here.
 #
 # Usage:
@@ -29,14 +32,17 @@ set -euo pipefail
 QUERY_FILE=""; OPERATION=""; VARIABLES=""; ENV_FILE=".env"; STORE=""
 API_VERSION="${SHOPIFY_ADMIN_API_VERSION:-2026-04}"
 
+# a value flag must not be the last arg — a bare `shift 2` would exit silently under set -e
+need_val() { [ "$1" -ge 2 ] || { echo "error=missing_value flag=$2" >&2; exit 2; }; }
+
 while [ $# -gt 0 ]; do
   case "$1" in
-    --query)        QUERY_FILE="${2:-}"; shift 2 ;;
-    --operation)    OPERATION="${2:-}"; shift 2 ;;
-    --variables)    VARIABLES="${2:-}"; shift 2 ;;
-    --env)          ENV_FILE="${2:-}"; shift 2 ;;
-    --store)        STORE="${2:-}"; shift 2 ;;
-    --api-version)  API_VERSION="${2:-}"; shift 2 ;;
+    --query)        need_val $# "$1"; QUERY_FILE="$2"; shift 2 ;;
+    --operation)    need_val $# "$1"; OPERATION="$2"; shift 2 ;;
+    --variables)    need_val $# "$1"; VARIABLES="$2"; shift 2 ;;
+    --env)          need_val $# "$1"; ENV_FILE="$2"; shift 2 ;;
+    --store)        need_val $# "$1"; STORE="$2"; shift 2 ;;
+    --api-version)  need_val $# "$1"; API_VERSION="$2"; shift 2 ;;
     *) echo "error=unknown_arg arg=$1" >&2; exit 2 ;;
   esac
 done
@@ -45,6 +51,11 @@ done
 [ -f "$QUERY_FILE" ] || { echo "error=query_file_not_found file=$QUERY_FILE" >&2; exit 2; }
 command -v curl >/dev/null 2>&1 || { echo "error=curl_not_found" >&2; exit 2; }
 command -v jq   >/dev/null 2>&1 || { echo "error=jq_not_found" >&2; exit 2; }
+
+if [ -n "$VARIABLES" ] && ! printf '%s' "$VARIABLES" | jq empty >/dev/null 2>&1; then
+  echo "error=invalid_variables_json (--variables must be valid JSON)" >&2
+  exit 2
+fi
 
 # --- token: env var wins, else read just the one line from the dotenv file (never echo it) ---
 TOKEN="${SHOPIFY_ADMIN_TOKEN:-}"
@@ -62,7 +73,8 @@ fi
 # --- store domain: --store, else $SHOPIFY_STORE, else uncommented store= in shopify.theme.toml ---
 if [ -z "$STORE" ]; then STORE="${SHOPIFY_STORE:-}"; fi
 if [ -z "$STORE" ] && [ -f "shopify.theme.toml" ]; then
-  STORE="$(grep -E '^[[:space:]]*store[[:space:]]*=' shopify.theme.toml | grep -v '^[[:space:]]*#' | tail -1 | sed -E 's/^[^=]*=[[:space:]]*//; s/[[:space:]]*#.*$//; s/^"//; s/"$//' )" || true
+  # head -1 = FIRST uncommented store= line, matching create-preview-theme.sh's toml_value
+  STORE="$(grep -E '^[[:space:]]*store[[:space:]]*=' shopify.theme.toml | grep -v '^[[:space:]]*#' | head -1 | sed -E 's/^[^=]*=[[:space:]]*//; s/[[:space:]]*#.*$//; s/^"//; s/"$//' )" || true
 fi
 [ -n "$STORE" ] || { echo "error=no_store (pass --store or set store= in shopify.theme.toml)" >&2; exit 2; }
 case "$STORE" in *.myshopify.com) DOMAIN="$STORE" ;; *) DOMAIN="${STORE}.myshopify.com" ;; esac
@@ -78,8 +90,13 @@ BODY="$(jq -n \
    + (if $op  != ""   then {operationName: $op}   else {} end)
    + (if $vars != null then {variables: $vars}     else {} end)')"
 
-# Token only ever appears in the header below; never in stdout/stderr.
+# The token goes into a private curl config file (mktemp = 0600, removed on exit) instead of
+# the argv, so it never shows in `ps` and never reaches stdout/stderr.
+HDR_CFG="$(mktemp)"
+trap 'rm -f "$HDR_CFG"' EXIT
+printf 'header = "X-Shopify-Access-Token: %s"\n' "$TOKEN" > "$HDR_CFG"
+
 curl -sS -X POST "$URL" \
-  -H "X-Shopify-Access-Token: ${TOKEN}" \
+  -K "$HDR_CFG" \
   -H "Content-Type: application/json" \
   --data "$BODY"

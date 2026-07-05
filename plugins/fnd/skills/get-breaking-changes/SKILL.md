@@ -12,7 +12,7 @@ arguments:
     description: Target repo (owner/name). Defaults to the current repo's origin remote.
   - name: since_version
     description: Optional baseline version; otherwise derive the last breaking (major) version from tags.
-allowed-tools: Read, Write, Bash(gh*), Bash(git*)
+allowed-tools: Read, Write, Bash(gh api*), Bash(gh pr list*), Bash(gh pr view*), Bash(gh pr diff*), Bash(git tag*), Bash(git show*), Bash(git add breaking-changes.md)
 ---
 
 # Get Breaking Changes
@@ -23,8 +23,10 @@ Identify confirmed breaking changes merged since the last breaking version. Focu
 
 1. **List SEMVER tags**
    ```bash
-   gh api repos/:owner/:repo/git/refs/tags --jq '.[].ref' | sed 's|refs/tags/||' | grep -E "^[0-9]+\.[0-9]+\.[0-9]+$" | sort -V
-   # or: git show-ref --tags | grep -E "refs/tags/[0-9]+\.[0-9]+\.[0-9]+$"
+   # single command, no pipeline — the filtering and semver sort happen inside --jq
+   gh api repos/:owner/:repo/git/refs/tags \
+     --jq '[.[].ref | sub("refs/tags/"; "") | select(test("^[0-9]+\\.[0-9]+\\.[0-9]+$"))] | sort_by(split(".") | map(tonumber)) | .[]'
+   # or locally: git tag --list --sort=v:refname '[0-9]*.[0-9]*.[0-9]*'
    ```
 2. **Identify the last breaking version** — the first tag of the current major series (e.g. `1.0.1` for the `1.x.x` series); a major bump = a breaking change.
 3. **Get its commit date**
