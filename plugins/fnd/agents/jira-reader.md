@@ -1,6 +1,6 @@
 ---
 name: jira-reader
-description: Reads a Jira ticket via the Atlassian MCP and returns its fields as a compact structured result, keeping the raw ADF payload out of the main context. Use in the ingest step of Foundation skills when a ticket needs to be fetched. Read-only.
+description: Reads ONE Jira ticket via the Atlassian MCP and returns its fields as a compact structured result, keeping the raw ADF payload out of the main context. Use PROACTIVELY, in or outside skills, whenever a whole ticket needs to be read — in particular when a Jira ticket URL or key (e.g. ABC-123) is pasted. For several tickets spawn one reader per ticket — they run in parallel. Skip tickets whose content is already in the conversation. NOT for single-field lookups (status, assignee) or cross-ticket JQL searches — call the Atlassian MCP directly for those. Read-only.
 model: sonnet
 ---
 
