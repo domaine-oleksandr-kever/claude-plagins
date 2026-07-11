@@ -19,12 +19,14 @@ the **ticket key** (`ELC-206`) for single-ticket work; for a **batch shipping as
 | `plan.md` | the **approved implementation plan**, verbatim | `develop-feature-or-fix`, at its ✋ checkpoint |
 | `qa.md` | the **approved QA checklist**, then the pass/fail report + confirmed findings with their repro values | `qa-feature-or-fix` |
 | `steps-to-test.md` | the **approved Steps to Test** (local copy of what went to Jira) | `write-steps-to-test` |
+| `metaobject-setup.graphql` | the Mode 2 living data-model setup file (`references/metafield-metaobject-setup.md`); inspection drafts go in `tmp/` | `develop-feature-or-fix` |
 | `notes.md` | append-only dated log: checkpoint decisions, gotchas, provisioned metafield/metaobject gids, preview theme name/id, test page paths; in a batch — root cause + fix summary per bug | any skill, at natural boundaries |
 | `progress.md` | work checklist — what's done, what's next (date + one-line status) | every series skill, at completion |
 | `tmp/` | scratch made while working — test scripts, query drafts, JSON dumps, screenshots — instead of littering the project root | anyone; delete freely |
 
 Frontmatter on ticket files: `ticket`, `url`, `fetched_at` (ISO datetime), `jira_updated` (the
-ticket's `updated` field as Jira returned it). On `figma-*.md`: `url`, `fetched_at`. The TA
+ticket's `updated` field as Jira returned it), and `verified_at` (last freshness probe that
+matched). On `figma-*.md`: `url`, `fetched_at`. The TA
 itself isn't duplicated here — it already lives in
 `docs/technical-approaches/<KEY>-technical-approach.md` (gitignored) and on the ticket.
 
@@ -45,10 +47,14 @@ A team that prefers a committed rule can put the line in `.gitignore` instead.
 
 ### Freshness
 
-- Ticket files in a **new session** (or when the developer hints the ticket changed): probe
-  cheaply from the main loop — `getJiraIssue` with `fields: ["updated"]` only (tiny response,
-  no subagent). `updated` ≠ stored `jira_updated` → stale → re-fetch via `jira-reader` and
-  rewrite the file. Same-session re-reads need no probe.
+- Ticket files: **re-verify before trusting** when (a) it's a new session, (b) `fetched_at` /
+  `verified_at` is **older than 24 h** — even mid-session, or (c) the developer hints the
+  ticket changed. The check is a cheap probe from the main loop — `getJiraIssue` with
+  `fields: ["updated"]` only (tiny response, no subagent): match → stamp `verified_at` and
+  trust the cache (probe at most once per session unless hinted); `updated` ≠ stored
+  `jira_updated` → stale → re-fetch via `jira-reader` and rewrite the file. **Probe
+  unavailable** (Atlassian MCP not connected)? Don't trust silently — tell the developer the
+  cache age ("ticket cached N h ago — use it, or refresh?") and let them decide.
 - `figma-*.md`: no cheap version probe exists — when in doubt, ask the developer whether the
   design changed since `fetched_at`.
 - `notes.md` is a log; it doesn't go stale.

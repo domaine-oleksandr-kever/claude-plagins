@@ -10,7 +10,9 @@ When the work is tied to a Jira ticket (key in the conversation or in the branch
 - **Write as you go.** Fetched ticket fields, approved plans / QA checklists / steps-to-test,
   decisions, per-bug root causes → into the workspace per that reference, so `/compact` and new
   sessions lose nothing.
-- **Scratch files** (test scripts, query drafts, dumps) go in `.claude/fnd/<work-id>/tmp/`,
-  never the project root.
+- **Ticket-scoped working files stay in the workspace**: scratch (test scripts, query drafts,
+  dumps, inspection `.graphql`) in `.claude/fnd/<work-id>/tmp/`; durable working artifacts
+  (e.g. the living `metaobject-setup.graphql`) at the workspace root — never the project root
+  or the repo's `docs/`.
 - Non-trivial ticket work underway with **no workspace yet** → offer `/fnd:save-task-context`
   once; if the developer agrees, keep the workspace updated from then on.
