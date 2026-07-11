@@ -17,27 +17,15 @@ allowed-tools: Read, Glob, Grep, Bash(git add*), Bash(node ${CLAUDE_PLUGIN_ROOT}
 
 # Write Technical Approach (Jira)
 
-Draft a Technical Approach (TA) for a Jira ticket. Follow the phases in order. **Do not skip the human review checkpoints (✋).**
+Draft a Technical Approach (TA) for a Jira ticket. Follow the phases in order.
 
-Series position: Workflow 2 — runs after the ticket is validated and before `develop-feature-or-fix`.
-
-## Inputs (ask if missing)
-
-- **Jira ticket URL or key** — the `jira_ticket` argument. The ticket's **Description** and **Acceptance Criteria** are the governing source of truth.
-
-## Operating mode
-
-- **Phase 1 — Analysis & planning:** work in **plan mode**. Gather context, validate readiness, clarify scope, draft the TA outline.
-- **Phase 2 — Write & publish:** leave plan mode once the developer approves the outline. Produce the markdown artifact; update Jira only after approval.
+Series position: Workflow 2 — after ticket validation, before `develop-feature-or-fix`.
+Input (ask if missing): **Jira ticket URL or key** (`jira_ticket`) — its **Description** and **Acceptance Criteria** are the governing source of truth.
+Operating mode: **Phase 1 in plan mode** (analysis, outline); leave plan mode once the developer approves the outline; Jira updates only after approval.
 
 ## North star
 
-**The ticket's Description and Acceptance Criteria govern the TA.** Every section describes **how** we deliver those requirements in this repo.
-
-- A decision not grounded in the AC belongs in **Assumptions** (developer-confirmed, with a reason) — not quietly inside another section.
-- If the AC is ambiguous or incomplete, **stop** and flag it before drafting — do not invent scope.
-- Fold ticket-stated assumptions into the **Assumptions** section so TA and ticket agree.
-- Any bullet that doesn't trace to an AC, an assumption, or a repo constraint (the repo's coding rules, core-extension policy, a11y / perf rules) gets cut.
+**The ticket's Description and AC govern the TA** — decisions not grounded in the AC land in **Assumptions** (developer-confirmed, with a reason), ambiguous or incomplete AC **stops** the draft, and any bullet that traces to neither AC, assumption, nor repo constraint gets cut. Full grounding rules: `${CLAUDE_PLUGIN_ROOT}/references/technical-approach-format.md` §North star.
 
 ## Global rules
 
@@ -50,13 +38,13 @@ Series position: Workflow 2 — runs after the ticket is validated and before `d
 
 ## Audience & voice
 
-Write for a **senior Shopify developer** who already knows the CLI, theme dev/deploy, Liquid / OS 2.0, and Foundation repo conventions. **Target read time ~3 minutes.** Skip basics; no tutorial content, no generic lint/preview boilerplate, no AI-speak. Full audience + anti-pattern guidance: read `${CLAUDE_PLUGIN_ROOT}/references/technical-approach-format.md`.
+Senior-Shopify-developer audience, **~3-minute read**, no tutorial content, no AI-speak — full audience + anti-pattern guidance: `${CLAUDE_PLUGIN_ROOT}/references/technical-approach-format.md` §Target audience / §Voice.
 
 ---
 
 ## Phase 1 — Analysis & planning `[plan mode]`
 
-1. **Ingest the ticket.** **Context-first:** if the conversation context already contains *all* the fields this skill needs, in full (not summarized or truncated — e.g. from an earlier skill run or a pasted ticket), use that and **skip the fetch**. Second stop: the **task workspace** — `.claude/fnd/<TICKET>/` may already hold the ticket, Figma specs, and series progress from an earlier skill or session; if fresh (rules: `${CLAUDE_PLUGIN_ROOT}/references/task-workspace.md`), use it and skip the fetch too. Otherwise **delegate to the `jira-reader` subagent** (pass the ticket key/URL): it reads via Atlassian MCP, applies `${CLAUDE_PLUGIN_ROOT}/references/jira-custom-fields.md`, and returns the structured fields — Description, AC, **Assumptions**, Technical Approach, Documentation Links, Steps to Test, `figma_urls` — keeping the raw ADF out of this context. If it returns `needs_clarification`, ask the developer. **After any fresh fetch, save the reader's output to the task workspace** so later skills and sessions skip the refetch.
+1. **Ingest the ticket** — context-first: full (not summarized) in-conversation fields count; second stop the task workspace `.claude/fnd/<TICKET>/` if fresh; otherwise delegate to the **`jira-reader`** subagent and **save its output to the workspace**. This skill needs: Description, AC, **Assumptions**, Technical Approach, Documentation Links, Steps to Test, `figma_urls`. `needs_clarification` → ask the developer.
 2. **Validate readiness** — confirm Description and AC exist and are sufficient. If missing or ambiguous, **stop**, summarize gaps, ask how to proceed.
 3. **Read every linked doc.** Read all links the `jira-reader` returned (`documentation_links`, `notion_urls`, `figma_urls`, `other_links`) per `${CLAUDE_PLUGIN_ROOT}/references/reading-linked-docs.md`. **Reuse before fetching:** in-conversation (full) or fresh workspace copies (`doc-<slug>.md`) count — fetch only missing/stale links, and save fresh extracts back. **Notion is mandatory** (read via the Notion MCP; **if it isn't connected, stop and ask the developer** to enable it or paste the content, don't draft around it). These docs often hold the real data model and final copy the TA must reflect.
 4. **Analyse the codebase** — inspect relevant areas for patterns, layout, dependencies, constraints. Apply the repo's coding rules (Liquid, blocks, Tailwind, a11y, etc.).
@@ -71,8 +59,8 @@ Present the **outline and open questions**. Wait for approval or edits before Ph
 
 ## Phase 2 — Write & review
 
-1. **Generate the TA** as markdown at `docs/technical-approaches/<TICKET-KEY>-technical-approach.md` (or an developer-preferred path). Strictly follow the skeleton in `${CLAUDE_PLUGIN_ROOT}/references/technical-approach-format.md`: the seven H4 sections in order (Summary → Files), starting at `#### Summary` with no title/metadata block, dense bullets over prose, inline code for paths. `docs/technical-approaches/` is **gitignored by default** — the TA stays local and doesn't ship in the client-facing repo (see the format reference) — so don't `git add` it unless `git check-ignore -q` shows the repo actually tracks that path and the developer wants it committed.
-2. **Optional — pressure-test the TA with deep-research.** Once the TA is drafted, **offer** it (never auto-run): *"Want me to run this TA through `deep-research`? It cross-checks the approach against fresh external sources (Shopify theme/Liquid capabilities, app/library behaviour, accessibility/perf, known pitfalls) using the ticket and any Figma/docs already in context. ⚠️ **It's token-heavy** — it fans out many web searches and verification passes, so it's worth it mainly for risky, novel, or integration-heavy tickets. `[ yes / no ]"`*. Default **no** — go straight to the checkpoint. On **yes**, invoke the `deep-research` skill, seeding it with the drafted TA **plus the fresh context already in this conversation** — the `jira-reader` ticket fields (Description, AC, Assumptions), any `figma-reader` specs, docs/links — so it doesn't re-fetch them, scoped to validating *this* approach (not open-ended research). Fold its findings into the TA and note what changed before presenting.
+1. **Generate the TA** as markdown at `docs/technical-approaches/<TICKET-KEY>-technical-approach.md` (or an developer-preferred path). Strictly follow the skeleton in the format reference (step 6): starting at `#### Summary`, no title/metadata block. `docs/technical-approaches/` is **gitignored by default** — the TA stays local and doesn't ship in the client-facing repo (see the format reference) — so don't `git add` it unless `git check-ignore -q` shows the repo actually tracks that path and the developer wants it committed.
+2. **Optional — pressure-test the TA with deep-research.** Offer once, never auto-run: *"Run this TA through `deep-research` (cross-checks against fresh external sources)? ⚠️ **Token-heavy** — worth it mainly for risky, novel, or integration-heavy tickets. `[ yes / no ]"`*. Default **no** — go straight to the checkpoint. On **yes**: invoke `deep-research` seeded with the drafted TA plus the ticket/specs/docs already in context (don't re-fetch), scoped to validating *this* approach; fold findings into the TA and note what changed.
 
 ### ✋ Checkpoint — Phase 2
 
@@ -88,4 +76,4 @@ Present the draft path and summary (with any deep-research findings folded in). 
 
 ## Next in the series
 
-**Mark progress:** on completing this workflow, check off its row in the ticket's workspace `progress.md` (creating the folder/file if absent — `${CLAUDE_PLUGIN_ROOT}/references/task-workspace.md`) with date + one-line status. Then, right after the final report, **offer the next unchecked step** in one line — normally `/fnd:develop-feature-or-fix <ticket>` once the TA is approved and on the ticket — and wait; never auto-run it (the developer may decline or need to supply inputs).
+Check off this workflow's row in the workspace `progress.md`, then offer the next unchecked step in one line — normally `/fnd:develop-feature-or-fix <ticket>` once the TA is on the ticket — **offer only; never auto-run**.

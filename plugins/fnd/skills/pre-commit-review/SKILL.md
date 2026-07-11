@@ -50,33 +50,22 @@ enough surrounding code to judge comments).
   file group, the `base`, and the raw B-hits to confirm. Merge its findings table with the
   inline B/D hits into the step-3 plan.
 
-The four checks, for reference (full definitions also live in the agent):
+The four checks (A and C full definitions live in the agent — their single home):
 
-For every changed file, inspect each comment — Liquid (`{% comment %}`, `{%- comment -%}`,
-`{% doc %}`), JS/TS (`//`, `/* */`, JSDoc `/** */`), CSS (`/* */`):
-
-- **A — Accuracy / staleness.** Does the comment still match the code? Flag comments that
-  reference renamed symbols, removed behaviour, wrong file/line/selector, an old approach that
-  was replaced, or a TODO that's already done. Verify against the *current* code, not memory.
-- **B — Ticket references.** Flag any reference to the ticket **or its parts** in a comment — they
-  go stale when the ticket changes and just clutter the code:
-  - **Jira keys** — `\b[A-Z]{2,}-\d+\b` (e.g. `ELC-70`, `ELC-206`).
-  - **Ticket-section pointers** — `(AC 1a)`, `AC 2`, `(TA 1a)`, `TA 3b`, and the phrases
-    `Acceptance Criteria`, `Technical Approach`, `Steps to Test` used as a *reference to the ticket*.
-  Propose removing the reference while keeping any useful context (reword to say what the code does
-  or why — don't just delete the sentence). **Keep** Figma node ids (`8947-59132`), SKU codes
-  (`S3HT11`), design/URL references, and tech acronyms that happen to match the pattern
-  (`UTF-8`, `SHA-256`, `ISO-8601`) — those aren't ticket references. First-pass signal:
+- **A — Accuracy / staleness** — run by the agent: comments that no longer match the current code.
+- **B — Ticket references.** Flag any reference to the ticket **or its parts** in a comment —
+  Jira keys (`\b[A-Z]{2,}-\d+\b`) and ticket-section pointers (`(AC 1a)`, `TA 3b`, and
+  `Acceptance Criteria` / `Technical Approach` / `Steps to Test` used as ticket references).
+  Propose removing the reference while keeping any useful context (reword to say what the code
+  does or why — don't just delete the sentence). First-pass signal:
   ```bash
   git diff "$mb" | grep -nE '^\+' \
     | grep -nE '\b[A-Z]{2,}-[0-9]+\b|\((AC|TA)[^)]*\)|\b(AC|TA) [0-9]+[a-z]?\b|Acceptance Criteria|Technical Approach|Steps to Test'
   ```
-  then confirm each hit is inside a **comment** (not code/data) before flagging — a real
-  `Acceptance Criteria` schema label, setting, or UI string is **not** a ticket reference, leave it.
-- **C — Refactor / improvement (required).** Actively look for and propose: duplication, dead
-  code, unclear names, copy-pasted blocks that could be shared, or small correctness/readability
-  wins **in the changed code only**. Always run this check — every change gets at least a
-  considered pass. Keep proposals scoped to the diff; don't propose broad rewrites of untouched code.
+  Raw hits go to the agent, which confirms each is inside a **comment** and applies the
+  false-positive whitelist (Figma ids, SKUs, `UTF-8`-style acronyms, real schema labels).
+- **C — Refactor / improvement (required)** — run by the agent: duplication, dead code, unclear
+  names, small correctness/readability wins — **in the changed code only**, every change gets a pass.
 - **D — Untracked referenced files.** Verify every file the changed code references —
   rendered/included snippets, imported JS/TS modules, assets, sections named in `templates/*.json` —
   exists on disk **and is tracked by git**. First-pass signal:
@@ -109,8 +98,7 @@ more. For approved check-D rows, run the agreed `git add <path>` so the referenc
 tracked. Then **stop**: report what changed and hand the commit back to the developer — stage
 the files and suggest `/fnd:commit` (it always shows the message and asks permission before
 committing). Never run `git commit` from this skill. If the branch's ticket has a task
-workspace, tick `pre-commit-review` in its `progress.md`
-(`${CLAUDE_PLUGIN_ROOT}/references/task-workspace.md`).
+workspace, tick `pre-commit-review` in its `progress.md`.
 
 **Write the marker.** After the edits are applied, record the review for this branch so
 `commit` / `create-pull-request` don't redundantly re-review (recompute `diff_hash` so it

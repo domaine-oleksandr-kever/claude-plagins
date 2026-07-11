@@ -114,20 +114,6 @@ block"). Link related tickets inline where relevant.>
 
 ---
 
-## Section intent cheatsheet
-
-| Section | Ask yourself |
-| --- | --- |
-| Summary | What are we building, what's the key decision/default, and where does the data come from? |
-| Assumptions | What's out of scope (→ which ticket), what must already be true, who owns what? |
-| Data / Config | Which Liquid objects, form inputs, block/section settings, metafields, and locale keys are touched? |
-| Implementation | Which files are new/changed, what behavior each owns, what's reused, where we extend core? |
-| Accessibility & Performance | The non-obvious a11y semantics and the runtime/payload/CLS/LCP impact. |
-| Dependencies | What must exist (apps, BFF, data, other tickets) for this to work or be QA'd? |
-| Files | Concrete `New:` / `Modified:` path list. |
-
----
-
 ## Worked reference (abridged, from ELC-126)
 
 ```markdown

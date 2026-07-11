@@ -29,15 +29,7 @@ Create commits that follow [Conventional Commits](https://www.conventionalcommit
 
 ## The body
 
-The Conventional Commits spec puts **no limit on body length** — it's free-form and may be any number of paragraphs. The `~72 cols` is only line *wrapping* (so `git log` reads well in a terminal); it does **not** cap how much you write.
-
-Write a body that's complete enough for a future reader — human or AI — to understand the change without opening the diff. Include:
-
-- **What** changed at a high level (not a line-by-line restatement of the diff).
-- **Why** — the motivation, bug symptom, or requirement that drove it.
-- **Context** worth knowing: trade-offs, alternatives rejected, side effects, follow-ups, or anything non-obvious.
-
-Skip the body only for genuinely trivial changes (typo, formatting, dependency bump) where the subject already says everything. When in doubt, write the body.
+No length cap — `~72 cols` is line *wrapping*, not a limit. Write it complete enough that a future reader understands the change without opening the diff: **what** changed at a high level, **why** (motivation, bug symptom, requirement), and non-obvious **context** (trade-offs, rejected alternatives, side effects, follow-ups). Skip the body only for genuinely trivial changes; when in doubt, write it.
 
 ## Types
 
@@ -68,11 +60,9 @@ does **not** run the hygiene review itself — it only ensures one happened:
 ## Workflow
 
 1. Run `git status` and `git diff --staged` (and `git diff` for unstaged) to see what's being committed.
-2. **Check for untracked referenced files.** Verify every file the committed code references —
-   rendered/included snippets, imported JS/TS modules, assets, sections named in `templates/*.json` —
-   is tracked by git. Cross-check `git status --porcelain | grep '^??'` (or
-   `git ls-files --error-unmatch <path>`) against references in the diff; if a referenced file
-   exists on disk but is untracked, `git add` it so it ships with the commit.
+2. **Check for untracked referenced files** — cross-check `git status --porcelain | grep '^??'`
+   (or `git ls-files --error-unmatch <path>`) against references in the diff; a referenced file
+   that exists on disk but is untracked → `git add` it so it ships with the commit.
 3. Pick the `type` from the dominant change.
 4. **If a task/ticket is in the conversation context (e.g. ELC-61), ask the user:**
    > "Add the task as scope — e.g. `feat(ELC-61): <message>`? Or commit without it?"
@@ -96,21 +86,12 @@ does **not** run the hygiene review itself — it only ensures one happened:
 ```
 feat(ELC-61): add Braze email signup to footer
 fix(cart): show delivery row in order summary
-refactor: extract pagination helper from PLP grid
-docs: document FHR feed product-id limitation
-chore: bump tailwind to v4.1
 ```
 
 ## Breaking changes
 
-Add a `!` after the type/scope and a `BREAKING CHANGE:` footer:
-
-```
-feat(api)!: drop support for legacy collection handles
-
-BREAKING CHANGE: handles must now use the prefixed format.
-```
+`!` after the type/scope plus a `BREAKING CHANGE: …` footer — e.g. `feat(api)!: drop support for legacy collection handles`.
 
 ## Next in the series
 
-When the commit belongs to a ticket that has a task workspace (`.claude/fnd/<TICKET>/` — `${CLAUDE_PLUGIN_ROOT}/references/task-workspace.md`), tick `commit` in its `progress.md` after committing, then offer the next unchecked step in one line — normally `/fnd:create-pull-request <ticket>` when the branch has no open PR. Offer only; never auto-run.
+When the commit belongs to a ticket with a task workspace, tick `commit` in its `progress.md`, then offer the next unchecked step in one line — normally `/fnd:create-pull-request <ticket>` when the branch has no open PR — **offer only; never auto-run**.

@@ -16,19 +16,11 @@ arguments:
 
 # Write Steps to Test (Jira)
 
-Produce **Steps to Test** in Domaine's standard format. **Do not skip the ✋ checkpoint.**
+Produce **Steps to Test** in Domaine's standard format.
 
 Series position: Workflow 5 — for QA handoff, typically alongside / after `qa-feature-or-fix`.
-
-## Inputs (ask if missing)
-
-- **Jira ticket URL or key** (`jira_ticket`).
-- Whether this is a **feature** or **bug** ticket (`ticket_type`) — the template may differ.
-
-## Operating mode
-
-- **Phase 1 — Analysis:** **plan mode** — ingest ticket + implementation context.
-- **Phase 2 — Write:** draft Steps to Test and optionally update Jira.
+Inputs (ask if missing): **Jira ticket URL or key** (`jira_ticket`); **feature or bug** (`ticket_type` — the template may differ).
+Operating mode: **Phase 1 in plan mode** (ingest ticket + implementation context); Phase 2 drafts the steps and optionally updates Jira.
 
 ## Global rules
 
@@ -40,7 +32,7 @@ Series position: Workflow 5 — for QA handoff, typically alongside / after `qa-
 
 ## Phase 1 — Analysis `[plan mode]`
 
-1. **Ingest the ticket.** **Context-first:** if the conversation context already contains *all* of the fields this skill needs (Description, AC, Technical Approach, Steps to Test, Figma links, environment notes) in full (not summarized or truncated — e.g. from an earlier skill run or a pasted ticket), use that and **skip the fetch**. Second stop: the **task workspace** — `.claude/fnd/<TICKET>/` may already hold the ticket, Figma specs, QA repro values (`notes.md`), and series progress from an earlier skill or session; if fresh (rules: `${CLAUDE_PLUGIN_ROOT}/references/task-workspace.md`), use it and skip the fetch too. Otherwise **delegate to the `jira-reader` subagent** (pass the ticket key/URL): it reads via Atlassian MCP, applies `${CLAUDE_PLUGIN_ROOT}/references/jira-custom-fields.md`, and returns the structured fields plus `figma_urls` / `notion_urls` / `other_links`, keeping the raw ADF out of this context. If it returns `needs_clarification`, ask the developer. **Read the linked docs** that define expected behaviour/data/copy per `${CLAUDE_PLUGIN_ROOT}/references/reading-linked-docs.md` — reuse before fetching (in-conversation or fresh workspace `doc-<slug>.md` copies count; save fresh extracts back), Notion via the Notion MCP (if it isn't connected, tell the developer rather than writing steps blind). **After any fresh fetch, save the reader's output to the task workspace** so later skills and sessions skip the refetch.
+1. **Ingest the ticket** — context-first: full (not summarized) in-conversation fields count; second stop the task workspace `.claude/fnd/<TICKET>/` if fresh (it also holds QA repro values in `notes.md`); otherwise delegate to the **`jira-reader`** subagent and **save its output to the workspace**. This skill needs: Description, AC, Technical Approach, Steps to Test, Figma links, environment notes (plus `figma_urls` / `notion_urls` / `other_links`). `needs_clarification` → ask. **Read the linked docs** that define expected behaviour/data/copy per `${CLAUDE_PLUGIN_ROOT}/references/reading-linked-docs.md` — reuse before fetching (in-conversation or fresh workspace `doc-<slug>.md` copies count; save fresh extracts back); if the Notion MCP isn't connected, tell the developer rather than writing steps blind.
 2. **Analyse the implementation** — from the diff or developer summary: what shipped, which settings/metafields/templates matter, and merchant-visible paths (Online Store editor, templates, URLs).
 3. **Identify test scenarios** — map each AC to one or more scenarios; include edge cases, negative paths, and data/setup prerequisites (collections, tags, markets, customer state, inventory, etc.).
 
@@ -72,4 +64,4 @@ Present the Steps to Test. Encourage the developer to **walk through** them (men
 
 ## Next in the series
 
-**Mark progress:** on completing this workflow, check off its row in the ticket's workspace `progress.md` (creating the folder/file if absent — `${CLAUDE_PLUGIN_ROOT}/references/task-workspace.md`) with date + one-line status. Then **offer the next unchecked step** in one line and wait; never auto-run it: `/fnd:create-pull-request <ticket>` if the branch has no PR yet; otherwise the series is complete — reviewers, QA hand-off, and the ticket transition stay with the developer.
+Check off this workflow's row in the workspace `progress.md`, then offer the next unchecked step in one line — `/fnd:create-pull-request <ticket>` if the branch has no PR yet, else the series is complete (reviewers, QA hand-off, ticket transition stay with the developer) — **offer only; never auto-run**.

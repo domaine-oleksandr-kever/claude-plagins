@@ -15,18 +15,11 @@ allowed-tools: Read, Glob, Bash(shopify version), Bash(node -v), Bash(npm -v), B
 
 # Preflight Checks
 
-Confirm required tooling is installed, configured, and authenticated so you don't hit failures mid-workflow. After this passes, the environment is cleared for Workflows 2–6. **Do not skip the ✋ checkpoint.**
+Confirm required tooling is installed, configured, and authenticated so you don't hit failures mid-workflow. After this passes, the environment is cleared for Workflows 2–6.
 
 Series position: Workflow 1 — runs before everything else.
-
-## Inputs (ask if missing)
-
-- Confirm the **workspace** is the intended project root (`workspace` argument).
-
-## Operating mode
-
-- **Phase 1 — Environment validation:** **plan mode** — check workspace, MCP connectivity, CLIs, project skills/rules, and the dev server.
-- **Phase 2 — Report & confirmation:** consolidate results, flag blockers, get developer sign-off.
+Input: confirm the **workspace** is the intended project root (`workspace` argument).
+Operating mode: **Phase 1 in plan mode** (validation); Phase 2 consolidates the report, flags blockers, gets sign-off.
 
 ## Global rules
 
@@ -38,19 +31,13 @@ Series position: Workflow 1 — runs before everything else.
 
 ## Phase 1 — Environment validation `[plan mode]`
 
-Run the full checklist in `${CLAUDE_PLUGIN_ROOT}/references/preflight-checklist.md`:
-
-1. **Workspace / IDE** — confirm the active workspace matches the target project; remind the developer to verify IDE/MCP security settings against team policy.
-2. **MCP servers** — Figma, Chrome DevTools, Atlassian, Shopify Dev: confirm installed + authenticated; on failure report the specific error + remediation.
-3. **CLI tools** — run (or ask the developer to run) the version commands; record versions; flag missing / outdated.
-4. **Project skills & rules** — confirm `.claude/skills/` and the repo's coding rules are present; list anything missing + how to restore.
-5. **Local dev server** — determine whether `npm run dev` (or `npm run theme:shopify`) is running; if not, remind the developer to start it before the develop / QA workflows (they need in-browser validation).
+Run the full checklist in `${CLAUDE_PLUGIN_ROOT}/references/preflight-checklist.md` (read it now — it owns the per-check items, commands, and remediation): **MCP servers → CLI tools → project skills & rules → local dev server**. Two skill-side specifics: first confirm the active **workspace/IDE** matches the target project and remind the developer to verify IDE/MCP security settings against team policy; and if the dev server isn't running, note that the develop/QA workflows need it for in-browser validation.
 
 ---
 
 ## Phase 2 — Report & confirmation
 
-1. **Generate the report** — summary table grouped by IDE/workspace · MCP servers · CLI tools · project skills & rules · local dev server; status per row as **🟢 Pass / 🔴 Fail / 🟡 Warning** with version/connection detail.
+1. **Generate the report** per the checklist's **Report format** section (grouped summary table, 🟢/🔴/🟡 per row, version/connection detail).
 2. **Flag blockers** — list critical failures + remediation; state clearly that downstream workflows should wait until critical items pass.
 
 ### ✋ Checkpoint
@@ -65,4 +52,4 @@ Present the report. Once the developer confirms issues are resolved or accepted,
 
 ## Next in the series
 
-Environment cleared → offer the ticket's entry point in one line and wait; never auto-run it: if a task workspace exists for the ticket (`.claude/fnd/<TICKET>/progress.md` — `${CLAUDE_PLUGIN_ROOT}/references/task-workspace.md`), offer its first unchecked step; otherwise `/fnd:write-technical-approach <ticket>` when the ticket has no approved TA, or `/fnd:develop-feature-or-fix <ticket>` when it does.
+Environment cleared → offer the ticket's entry point in one line — the first unchecked step in `.claude/fnd/<TICKET>/progress.md` when a workspace exists; else `/fnd:write-technical-approach <ticket>` (no approved TA) or `/fnd:develop-feature-or-fix <ticket>` (TA approved) — **offer only; never auto-run**.
