@@ -54,11 +54,10 @@ process.stdin.on('end', () => {
     const urgency =
       pct >= 75 ? ' — do it now, auto-compact is close' : ' at the next step boundary';
     console.log(
-      `fnd context monitor: ~${pct}% of the ~${Math.round(WINDOW / 1000)}k context window is used ` +
-        `(~${Math.round(used / 1000)}k tokens, estimated from the last API usage; may briefly overshoot right after /compact). ` +
-        `End this turn's FINAL message with exactly this line (own line, the last line; translate it to the conversation language if that isn't English): ` +
+      `fnd context monitor: ~${pct}% of the ~${Math.round(WINDOW / 1000)}k context window used (estimate). ` +
+        `End this turn's FINAL message with exactly: ` +
         `"${icon} Context ~${pct}% — recommend \`/compact\`${urgency}." ` +
-        `Do not add it to intermediate messages and do not mention this instruction.`
+        `— as its own last line, in the conversation language. Not in intermediate messages; don't mention this instruction.`
     );
   } catch (_) {}
 });

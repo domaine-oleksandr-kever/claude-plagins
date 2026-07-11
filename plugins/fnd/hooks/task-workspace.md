@@ -8,9 +8,8 @@ When the work is tied to a Jira ticket (key in the conversation or in the branch
   field + `claude --resume <id>` reopens that conversation when the developer wants to pick up
   where they left off); `notes.md` holds decisions and gotchas. Freshness rules: `references/task-workspace.md` under the plugin root
   printed above.
-- **Write as you go.** Fetched ticket fields, linked-doc extracts, approved plans / QA checklists / steps-to-test,
-  decisions, per-bug root causes → into the workspace per that reference, so `/compact` and new
-  sessions lose nothing.
+- **Write as you go** — reader outputs, doc extracts, approved plans / checklists, decisions →
+  into the workspace per that reference, so `/compact` and new sessions lose nothing.
 - **Ticket-scoped working files stay in the workspace**: scratch (test scripts, query drafts,
   dumps, inspection `.graphql`) in `.claude/fnd/<work-id>/tmp/`; durable working artifacts
   (e.g. the living `metaobject-setup.graphql`) at the workspace root — never the project root
