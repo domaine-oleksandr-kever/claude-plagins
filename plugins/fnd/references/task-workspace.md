@@ -1,0 +1,108 @@
+# Task workspace — per-ticket cache of reader outputs & working notes
+
+Once `jira-reader` / `figma-reader` have pulled a ticket or a Figma node, their structured
+output is saved to files in the project so the **next** skill — or a new session, or the turn
+after a `/compact` — reads the file instead of re-spawning the agent. Facts that live here
+survive context compaction, so compacting between workflow steps becomes cheap.
+
+## Location & layout
+
+`.claude/fnd/<work-id>/` in the project repo — one folder per **unit of work**. `<work-id>` is
+the **ticket key** (`ELC-206`) for single-ticket work; for a **batch shipping as one PR**
+(several bug tickets fixed on one branch, no full series per bug) use the **branch slug**
+(`fix-plp-bugs`) with one `ticket-<KEY>.md` per ticket inside:
+
+| File | Holds | Written by |
+|---|---|---|
+| `ticket.md` — in a batch, `ticket-<KEY>.md` each | `jira-reader` structured output, **verbatim** (Description, AC, Assumptions, TA, Steps to Test, links) | the skill that ran the fetch |
+| `figma-<node-id>.md` | one `figma-reader` build spec, **verbatim** — one file per node | same |
+| `plan.md` | the **approved implementation plan**, verbatim | `develop-feature-or-fix`, at its ✋ checkpoint |
+| `qa.md` | the **approved QA checklist**, then the pass/fail report + confirmed findings with their repro values | `qa-feature-or-fix` |
+| `steps-to-test.md` | the **approved Steps to Test** (local copy of what went to Jira) | `write-steps-to-test` |
+| `notes.md` | append-only dated log: checkpoint decisions, gotchas, provisioned metafield/metaobject gids, preview theme name/id, test page paths; in a batch — root cause + fix summary per bug | any skill, at natural boundaries |
+| `progress.md` | work checklist — what's done, what's next (date + one-line status) | every series skill, at completion |
+| `tmp/` | scratch made while working — test scripts, query drafts, JSON dumps, screenshots — instead of littering the project root | anyone; delete freely |
+
+Frontmatter on ticket files: `ticket`, `url`, `fetched_at` (ISO datetime), `jira_updated` (the
+ticket's `updated` field as Jira returned it). On `figma-*.md`: `url`, `fetched_at`. The TA
+itself isn't duplicated here — it already lives in
+`docs/technical-approaches/<KEY>-technical-approach.md` (gitignored) and on the ticket.
+
+**Keep it out of git.** Before the first write, ensure the folder is ignored **locally** (never
+ships in a diff):
+
+```bash
+git check-ignore -q .claude/fnd || echo '.claude/fnd/' >> .git/info/exclude
+```
+
+A team that prefers a committed rule can put the line in `.gitignore` instead.
+
+## Read rule — context-first order
+
+1. **This conversation** — the fields are already in context, in full (not summarized): use them.
+2. **The workspace files** — present and fresh (below): read them; don't spawn a reader.
+3. **Fetch** — spawn `jira-reader` / `figma-reader`, then save the output (write rule).
+
+### Freshness
+
+- Ticket files in a **new session** (or when the developer hints the ticket changed): probe
+  cheaply from the main loop — `getJiraIssue` with `fields: ["updated"]` only (tiny response,
+  no subagent). `updated` ≠ stored `jira_updated` → stale → re-fetch via `jira-reader` and
+  rewrite the file. Same-session re-reads need no probe.
+- `figma-*.md`: no cheap version probe exists — when in doubt, ask the developer whether the
+  design changed since `fetched_at`.
+- `notes.md` is a log; it doesn't go stale.
+
+## Write rule
+
+- Immediately after a reader returns, write its structured output **verbatim** — don't
+  re-summarize; later skills need the full fields. Overwrite on re-fetch.
+- Append to `notes.md` at natural boundaries — approved-plan decisions, provisioned data
+  (gids), preview theme, test URLs, confirmed bugs + the hostile values that triggered them.
+  One dated `##` entry per event, newest last.
+- Scratch files created while working (test scripts, query drafts, dumps, screenshots) go in
+  the workspace `tmp/` — never the project root.
+- **Never** store secrets (tokens, `.env` values) or raw payloads (ADF, Figma node trees) —
+  only the readers' compact structured outputs.
+
+## Progress tracking — `progress.md`
+
+So a **clean/new session** knows where the work stands and what to offer next. The first
+series skill to run on a ticket creates the folder and this file with the full list unchecked;
+outside the series (ad-hoc flows), the `save-task-context` skill or the session convention does:
+
+```markdown
+---
+ticket: ELC-206
+updated: <ISO datetime>
+---
+- [ ] write-technical-approach
+- [ ] develop-feature-or-fix
+- [ ] qa-feature-or-fix
+- [ ] pre-commit-review
+- [ ] commit
+- [ ] create-pull-request
+- [ ] write-steps-to-test
+```
+
+For a **batch** (`<work-id>` = branch slug) the rows are the tickets plus the shared tail —
+check each bug off as it's fixed, with its root cause:
+
+```markdown
+- [x] ELC-301 — 2026-07-11, fixed: self-reference skipped in bundle resolve
+- [ ] ELC-302
+- [ ] pre-commit-review
+- [ ] commit
+- [ ] create-pull-request
+- [ ] write-steps-to-test
+```
+
+- On completing its workflow (final report delivered and, where applicable, approved), a skill
+  checks off its row and appends `— <date>, <one-line status>` (branch, PR URL, "QA: 2 blocking
+  bugs", …). Re-runs update the row in place; stamp `updated` on every write.
+- **Offering the next step:** offer the first unchecked row (QA failures branch back to the
+  implementation flow first). In a fresh session, reading this file replaces the lost
+  conversation state — when the developer brings up a ticket that has a workspace, report where
+  the series stands and offer the next unchecked step.
+
+The folder is a cache: safe to delete at any time; suggest removing it once the ticket is Done.

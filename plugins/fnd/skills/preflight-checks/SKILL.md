@@ -62,3 +62,7 @@ Present the report. Once the developer confirms issues are resolved or accepted,
 - Honest status — no assumed green checks.
 - Actionable remediation for every failure.
 - Compact table suitable for pasting into a ticket or session notes.
+
+## Next in the series
+
+Environment cleared → offer the ticket's entry point in one line and wait; never auto-run it: if a task workspace exists for the ticket (`.claude/fnd/<TICKET>/progress.md` — `${CLAUDE_PLUGIN_ROOT}/references/task-workspace.md`), offer its first unchecked step; otherwise `/fnd:write-technical-approach <ticket>` when the ticket has no approved TA, or `/fnd:develop-feature-or-fix <ticket>` when it does.

@@ -40,7 +40,7 @@ Series position: Workflow 5 — for QA handoff, typically alongside / after `qa-
 
 ## Phase 1 — Analysis `[plan mode]`
 
-1. **Ingest the ticket.** **Context-first:** if the conversation context already contains *all* of the fields this skill needs (Description, AC, Technical Approach, Steps to Test, Figma links, environment notes) in full (not summarized or truncated — e.g. from an earlier skill run or a pasted ticket), use that and **skip the fetch**. Otherwise **delegate to the `jira-reader` subagent** (pass the ticket key/URL): it reads via Atlassian MCP, applies `${CLAUDE_PLUGIN_ROOT}/references/jira-custom-fields.md`, and returns the structured fields plus `figma_urls` / `notion_urls` / `other_links`, keeping the raw ADF out of this context. If it returns `needs_clarification`, ask the developer. **Read the linked docs** that define expected behaviour/data/copy per `${CLAUDE_PLUGIN_ROOT}/references/reading-linked-docs.md` — Notion via the Notion MCP (if it isn't connected, tell the developer rather than writing steps blind).
+1. **Ingest the ticket.** **Context-first:** if the conversation context already contains *all* of the fields this skill needs (Description, AC, Technical Approach, Steps to Test, Figma links, environment notes) in full (not summarized or truncated — e.g. from an earlier skill run or a pasted ticket), use that and **skip the fetch**. Second stop: the **task workspace** — `.claude/fnd/<TICKET>/` may already hold the ticket, Figma specs, QA repro values (`notes.md`), and series progress from an earlier skill or session; if fresh (rules: `${CLAUDE_PLUGIN_ROOT}/references/task-workspace.md`), use it and skip the fetch too. Otherwise **delegate to the `jira-reader` subagent** (pass the ticket key/URL): it reads via Atlassian MCP, applies `${CLAUDE_PLUGIN_ROOT}/references/jira-custom-fields.md`, and returns the structured fields plus `figma_urls` / `notion_urls` / `other_links`, keeping the raw ADF out of this context. If it returns `needs_clarification`, ask the developer. **Read the linked docs** that define expected behaviour/data/copy per `${CLAUDE_PLUGIN_ROOT}/references/reading-linked-docs.md` — Notion via the Notion MCP (if it isn't connected, tell the developer rather than writing steps blind). **After any fresh fetch, save the reader's output to the task workspace** so later skills and sessions skip the refetch.
 2. **Analyse the implementation** — from the diff or developer summary: what shipped, which settings/metafields/templates matter, and merchant-visible paths (Online Store editor, templates, URLs).
 3. **Identify test scenarios** — map each AC to one or more scenarios; include edge cases, negative paths, and data/setup prerequisites (collections, tags, markets, customer state, inventory, etc.).
 
@@ -60,7 +60,7 @@ Series position: Workflow 5 — for QA handoff, typically alongside / after `qa-
 
 ### ✋ Checkpoint
 
-Present the Steps to Test. Encourage the developer to **walk through** them (mentally or on preview) to catch gaps.
+Present the Steps to Test. Encourage the developer to **walk through** them (mentally or on preview) to catch gaps. Once approved, save them to the workspace `steps-to-test.md` (`${CLAUDE_PLUGIN_ROOT}/references/task-workspace.md`) before the Jira write-back.
 
 2. **Update Jira** (only after approval) — ask **manual update** vs **Atlassian MCP**. Place content in the **Steps to Test** custom field per process — not only comments. **The Steps to Test field is rich-text (ADF), so convert the approved steps to ADF before writing** — write the approved markdown to a temp file, run `node ${CLAUDE_PLUGIN_ROOT}/scripts/md-to-adf.cjs --no-tables <that-file>`, then `editJiraIssue` with `fields: { "<Steps to test field id>": <the ADF JSON> }`. The converter outputs **minified** ADF and `--no-tables` keeps it compact — a big ADF blob is fragile to inline. **Never send the raw markdown string** — custom fields reject it (`Operation value must be an Atlassian Document`); the MCP's markdown auto-conversion only applies to comments/description, not custom fields. If the converter prints a **size warning** to stderr, **trim/restructure** the steps (shorter, drop tables) — do not fall back to markdown. See **`${CLAUDE_PLUGIN_ROOT}/references/jira-custom-fields.md` → Keep the ADF compact**.
 
@@ -69,3 +69,7 @@ Present the Steps to Test. Encourage the developer to **walk through** them (men
 - Full AC coverage.
 - Deterministic steps (no "verify it works" without criteria).
 - Theme-agnostic navigation (relative path / template / customizer location, **not** a preview-theme link) so any tester reproduces it on their own theme.
+
+## Next in the series
+
+**Mark progress:** on completing this workflow, check off its row in the ticket's workspace `progress.md` (creating the folder/file if absent — `${CLAUDE_PLUGIN_ROOT}/references/task-workspace.md`) with date + one-line status. Then **offer the next unchecked step** in one line and wait; never auto-run it: `/fnd:create-pull-request <ticket>` if the branch has no PR yet; otherwise the series is complete — reviewers, QA hand-off, and the ticket transition stay with the developer.

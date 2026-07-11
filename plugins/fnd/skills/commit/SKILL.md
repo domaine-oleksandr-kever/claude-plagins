@@ -110,3 +110,7 @@ feat(api)!: drop support for legacy collection handles
 
 BREAKING CHANGE: handles must now use the prefixed format.
 ```
+
+## Next in the series
+
+When the commit belongs to a ticket that has a task workspace (`.claude/fnd/<TICKET>/` — `${CLAUDE_PLUGIN_ROOT}/references/task-workspace.md`), tick `commit` in its `progress.md` after committing, then offer the next unchecked step in one line — normally `/fnd:create-pull-request <ticket>` when the branch has no open PR. Offer only; never auto-run.

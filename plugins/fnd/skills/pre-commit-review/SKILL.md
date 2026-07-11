@@ -108,7 +108,9 @@ After the developer approves (with their corrections), make exactly the agreed e
 more. For approved check-D rows, run the agreed `git add <path>` so the referenced files are
 tracked. Then **stop**: report what changed and hand the commit back to the developer — stage
 the files and suggest `/fnd:commit` (it always shows the message and asks permission before
-committing). Never run `git commit` from this skill.
+committing). Never run `git commit` from this skill. If the branch's ticket has a task
+workspace, tick `pre-commit-review` in its `progress.md`
+(`${CLAUDE_PLUGIN_ROOT}/references/task-workspace.md`).
 
 **Write the marker.** After the edits are applied, record the review for this branch so
 `commit` / `create-pull-request` don't redundantly re-review (recompute `diff_hash` so it
