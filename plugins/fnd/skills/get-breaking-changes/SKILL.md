@@ -38,7 +38,7 @@ Identify confirmed breaking changes merged since the last breaking version. Focu
    gh pr list --label "Breaking changes" --state merged --search "merged:>YYYY-MM-DD base:main" --json number,title,mergedAt,url
    ```
 5. **Get PR details** — for each PR: `gh pr view <number> --json title,body,files,mergedAt,url` (and `gh pr diff <number>` for the template changes).
-6. **Classify each** by impact: API Changes · Configuration Changes · Behavior Changes · Schema Changes · Removal of Features.
+6. **Classify each** by impact — the five classes named in the output template below.
 7. **Analyze solution patterns** — inspect `/templates` changes in each PR diff for systematic find/replace patterns (settings removed, block-type changes, value updates) and capture them.
 
 ## Output

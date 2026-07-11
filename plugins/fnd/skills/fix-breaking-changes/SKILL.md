@@ -50,5 +50,4 @@ Apply the fixes documented in `breaking-changes.md` to `templates/*.json` and `c
 
 ## Notes
 
-- The script preserves template comment headers and 2-space JSON formatting, and recurses through nested objects/arrays.
 - Test incrementally — run theme check after each fix type.

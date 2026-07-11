@@ -7,7 +7,8 @@ survive context compaction, so compacting between workflow steps becomes cheap.
 
 ## Location & layout
 
-`.claude/fnd/<work-id>/` in the project repo — one folder per **unit of work**. `<work-id>` is
+`.claude/fnd/<work-id>/` in the project repo — one folder per **unit of work**; the folder is a
+**cache**, safe to delete at any time (suggest removing it once the ticket is Done). `<work-id>` is
 the **ticket key** (`ELC-206`) for single-ticket work; for a **batch shipping as one PR**
 (several bug tickets fixed on one branch, no full series per bug) use the **branch slug**
 (`fix-plp-bugs`) with one `ticket-<KEY>.md` per ticket inside:
@@ -71,13 +72,12 @@ A team that prefers a committed rule can put the line in `.gitignore` instead.
 - `doc-*.md`: same triggers as ticket files. Cheap probe, no full fetch — **Notion**:
   `notion-search` the stored `title` (small `page_size`, `max_highlight_length: 0`), match the
   result to the page id embedded in the stored `url`, read its `timestamp`: a **day**-granular
-  last-edited date (connected sources, e.g. Google Drive docs, surface the same way);
-  **Confluence**: `searchConfluenceUsingCql` with `cql: "id=<pageId>"` → precise `lastModified`.
-  Probe date ≤ the stored `last_edited` / `fetched_at` date → fresh: stamp `verified_at`.
-  Newer → re-fetch, re-extract, overwrite (refresh `last_edited`). Blind spots: same-day edits
-  (day granularity) and plain-web links (no probe) — on a developer hint, or with no probe
-  path, ask, as with `figma-*.md`. A cached extract that lacks something *this* task needs
-  isn't stale, it's incomplete — re-read the source.
+  last-edited date (covers connected Google-Drive docs too); **Confluence**:
+  `searchConfluenceUsingCql` with `cql: "id=<pageId>"` → precise `lastModified`. Probe date ≤
+  stored `last_edited` / `fetched_at` date → fresh: stamp `verified_at`; newer → re-fetch,
+  re-extract, overwrite. Same-day edits (day granularity) and plain-web links (no probe): ask,
+  as with `figma-*.md`. An extract that lacks something *this* task needs isn't stale, it's
+  incomplete — re-read the source.
 - `notes.md` is a log; it doesn't go stale.
 
 ## Write rule
@@ -115,17 +115,9 @@ session: <$CLAUDE_CODE_SESSION_ID of the last session that wrote here>
 - [ ] write-steps-to-test
 ```
 
-For a **batch** (`<work-id>` = branch slug) the rows are the tickets plus the shared tail —
-check each bug off as it's fixed, with its root cause:
-
-```markdown
-- [x] ELC-301 — 2026-07-11, fixed: self-reference skipped in bundle resolve
-- [ ] ELC-302
-- [ ] pre-commit-review
-- [ ] commit
-- [ ] create-pull-request
-- [ ] write-steps-to-test
-```
+For a **batch** (`<work-id>` = branch slug) the rows are the tickets plus the same shared tail
+(pre-commit-review → … → write-steps-to-test) — check each bug off as it's fixed, with its root
+cause: `- [x] ELC-301 — 2026-07-11, fixed: self-reference skipped in bundle resolve`.
 
 - On completing its workflow (final report delivered and, where applicable, approved), a skill
   checks off its row and appends `— <date>, <one-line status>` (branch, PR URL, "QA: 2 blocking
@@ -136,11 +128,7 @@ check each bug off as it's fixed, with its root cause:
   conversation state — when the developer brings up a ticket that has a workspace, report where
   the series stands and offer the next unchecked step.
 - **Resuming a conversation:** `session` names the conversation that last wrote here. On
-  *"where did we leave off on X?"*, answer from `progress.md` + `notes.md`; if that session
-  isn't the current one (compare `$CLAUDE_CODE_SESSION_ID`), also offer
-  `claude --resume <session>` (run from this project) to reopen it in full. For a detail the
-  workspace didn't capture, that session's transcript sits at
-  `~/.claude/projects/<project-dir-slug>/<session>.jsonl` — pull the last few user/assistant
-  messages from its tail, not the tool dumps.
-
-The folder is a cache: safe to delete at any time; suggest removing it once the ticket is Done.
+  *"where did we leave off on X?"*, answer from `progress.md` + `notes.md`; if it isn't the
+  current session, also offer `claude --resume <session>` (from this project). A detail the
+  workspace didn't capture → pull the last user/assistant messages from that transcript's tail
+  (`~/.claude/projects/<project-dir-slug>/<session>.jsonl`), not the tool dumps.

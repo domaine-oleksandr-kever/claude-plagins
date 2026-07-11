@@ -18,11 +18,9 @@ Fix accessibility issues in theme components. Follow the standard issue-fix work
 
 ## Component ARIA patterns
 
-Before implementing, **search the codebase for the existing ARIA pattern** for the component type (`Grep` for `role=`, `aria-*`, and the component name), and follow the **WCAG ARIA Authoring Practices (APG)** pattern for that widget. Common component types in this theme:
+Before implementing, **search the codebase for the existing ARIA pattern** for the component type (`Grep` for `role=`, `aria-*`, and the component name) — match it first, and reach for the **WCAG ARIA Authoring Practices (APG)** pattern only when there's no precedent. Common component types in this theme:
 
 `accordion · breadcrumb · carousel/slider · cart-drawer · color-swatch · combobox/dropdown · disclosure · dropdown-navigation · modal/dialog · product-card · product-filter · sale-price · switch · tab · tooltip`
-
-Match the existing repo pattern first; reach for the APG spec when there's no precedent.
 
 ## Critical implementation rules
 
@@ -39,15 +37,15 @@ Match the existing repo pattern first; reach for the APG spec when there's no pr
 
 ## Implementation guidelines
 
-- Search for existing ARIA patterns first; make **minimal** changes; favour semantic correctness over visual change; keep backward compatibility.
-- Don't over-engineer — native browser behaviour (`<details>`, `<dialog>`, `popover`) often suffices.
+- Favour semantic correctness over visual change; keep backward compatibility.
+- Native browser behaviour (`<details>`, `<dialog>`, `popover`) often suffices.
 - Use `aria-labelledby` to reference existing visible text instead of duplicating it in `aria-label`.
 - Avoid duplicate logic between keyboard and mouse handlers; separate ARIA-state management from focus management.
 - Toggle visual state via `data-*` attributes + Tailwind `data-[]:` selectors, not `classList`/`style.*` — the repo lints against those; if legacy code trips `no-restricted-syntax`, see `${CLAUDE_PLUGIN_ROOT}/references/eslint-no-restricted-syntax.md`.
 
 ## Performance
 
-- Complex keyboard navigation can introduce lag — test on slower devices; prefer simpler solutions before custom keyboard handling.
+- Prefer simpler solutions before custom keyboard handling — complex key navigation introduces lag.
 
 ## Testing
 

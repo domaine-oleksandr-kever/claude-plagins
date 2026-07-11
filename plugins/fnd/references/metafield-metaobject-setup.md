@@ -56,32 +56,10 @@ developer to re-run that same command (fast: the app is already installed). **Ne
 is interactive and hangs a non-TTY run. Mutations are auto-opted-in by the runner
 (`--allow-mutations`); the CLI blocks them otherwise.
 
-Browser-step troubleshooting: **HTTP 431** on the authorize URL = cookie bloat on
-`.myshopify.com` — have the developer open that same URL in an **incognito** window (log in
-there; the CLI keeps listening on its localhost callback, so the flow completes) or clear
-cookies for the store domain and retry. A "This store will be right back" page means a wrong
-or paused store domain.
-
-**Asking the developer to (re-)auth — short, with context.** The developer may not know this
-CLI 4.x flow exists, so never just say "auth expired". And don't interrupt at all if the runner
-already fell back to the token engine — the work isn't blocked; mention it at the next natural
-pause. When you ARE blocked (neither engine set up) or want the preferred engine back, ask with
-a compact blurb like:
-
-> Store auth for `<domain>` is missing/expired — it's an online token (max 24 h, dies with your
-> admin session). One command restores it; it's the Shopify CLI 4.x flow that installs a
-> Shopify-managed app on the store, so no token ever lands in the repo. Run it right here:
->
-> `! shopify store auth --store <domain> --scopes <scopes the task needs>`
->
-> A browser window will open — approve it there. It needs the store's **"Install apps"**
-> permission; if you don't have it, say so and we'll use `SHOPIFY_ADMIN_TOKEN` in `.env`
-> (or the GraphiQL flow) instead. And tell me if this store should stay **read-only** — then
-> I'll request only the `read_*` scopes and hand the mutations to you instead of running them.
-
-The `!` prefix runs the command inside the Claude Code session, so its output lands in the
-conversation. If the developer asks *you* to run it, run it in the foreground and tell them to
-complete the browser approval.
+**Auth fails, expires, or the browser step misbehaves** → read
+`${CLAUDE_PLUGIN_ROOT}/references/store-auth-troubleshooting.md` — the fix per symptom and the
+ready-to-relay re-auth blurb (never just say "auth expired"; don't interrupt if the runner
+already fell back to the token engine).
 
 **Engine 2 — Admin API access token.** `shpat_…`, with scopes
 `read/write_metaobject_definitions`, `read/write_metaobjects`, `read/write_products` (plus

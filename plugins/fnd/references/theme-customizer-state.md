@@ -135,11 +135,6 @@ nothing (same rule as data-driven AC in `metafield-metaobject-setup.md`).
 
 ## Sandbox for aggressive walks
 
-When a test would thrash the shared dev theme (many states, risky JSON), take a disposable copy
-instead: the ticket's preview theme from `${CLAUDE_PLUGIN_ROOT}/scripts/create-preview-theme.sh`
-(builds the project, pushes an unpublished theme — the natural sandbox during development), or
-`shopify theme duplicate -t <id> -n "fnd-<ticket>-sandbox" -f --json` (needs theme CLI auth).
-Don't count on GraphQL `themeCreate(source:)` — it refuses redirecting/chunked zip URLs (GitHub
-archive links fail with `Src is empty`). Mutate the copy freely, verify via its preview, then
-**delete it** (`shopify theme delete` / `themeDelete`) — stores cap out around 20 themes, and
-stray sandboxes read as clutter to the client.
+A walk would thrash the shared dev theme (many states, risky JSON) → take a disposable copy per
+`${CLAUDE_PLUGIN_ROOT}/references/customizer-sandbox.md` (preview theme or `theme duplicate`;
+mutate freely, verify, **delete it** after).
