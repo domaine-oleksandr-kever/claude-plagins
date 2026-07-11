@@ -16,6 +16,7 @@ the **ticket key** (`ELC-206`) for single-ticket work; for a **batch shipping as
 |---|---|---|
 | `ticket.md` — in a batch, `ticket-<KEY>.md` each | `jira-reader` structured output, **verbatim** (Description, AC, Assumptions, TA, Steps to Test, links) | the skill that ran the fetch |
 | `figma-<node-id>.md` | one `figma-reader` build spec, **verbatim** — one file per node | same |
+| `doc-<slug>.md` | one linked doc's **extracted** content (data models, copy, field lists — never the raw page); slug from the page title | the skill that read it |
 | `plan.md` | the **approved implementation plan**, verbatim | `develop-feature-or-fix`, at its ✋ checkpoint |
 | `qa.md` | the **approved QA checklist**, then the pass/fail report + confirmed findings with their repro values | `qa-feature-or-fix` |
 | `steps-to-test.md` | the **approved Steps to Test** (local copy of what went to Jira) | `write-steps-to-test` |
@@ -26,7 +27,9 @@ the **ticket key** (`ELC-206`) for single-ticket work; for a **batch shipping as
 
 Frontmatter on ticket files: `ticket`, `url`, `fetched_at` (ISO datetime), `jira_updated` (the
 ticket's `updated` field as Jira returned it), and `verified_at` (last freshness probe that
-matched). On `figma-*.md`: `url`, `fetched_at`. The TA
+matched). On `figma-*.md`: `url`, `fetched_at`. On `doc-*.md`: `url`, `title`, `fetched_at`,
+`last_edited` (the source's own last-edited stamp, when known) and — when sub-pages were folded
+into the extract — a `sources:` list of url + last-edited pairs. The TA
 itself isn't duplicated here — it already lives in
 `docs/technical-approaches/<KEY>-technical-approach.md` (gitignored) and on the ticket.
 
@@ -43,7 +46,8 @@ A team that prefers a committed rule can put the line in `.gitignore` instead.
 
 1. **This conversation** — the fields are already in context, in full (not summarized): use them.
 2. **The workspace files** — present and fresh (below): read them; don't spawn a reader.
-3. **Fetch** — spawn `jira-reader` / `figma-reader`, then save the output (write rule).
+3. **Fetch** — spawn `jira-reader` / `figma-reader`, or read the linked doc, then save the
+   output (write rule).
 
 ### Freshness
 
@@ -64,18 +68,30 @@ A team that prefers a committed rule can put the line in `.gitignore` instead.
   developer the cache age ("ticket cached N h ago — use it, or refresh?") and let them decide.
 - `figma-*.md`: no cheap version probe exists — when in doubt, ask the developer whether the
   design changed since `fetched_at`.
+- `doc-*.md`: same triggers as ticket files. Cheap probe, no full fetch — **Notion**:
+  `notion-search` the stored `title` (small `page_size`, `max_highlight_length: 0`), match the
+  result to the page id embedded in the stored `url`, read its `timestamp`: a **day**-granular
+  last-edited date (connected sources, e.g. Google Drive docs, surface the same way);
+  **Confluence**: `searchConfluenceUsingCql` with `cql: "id=<pageId>"` → precise `lastModified`.
+  Probe date ≤ the stored `last_edited` / `fetched_at` date → fresh: stamp `verified_at`.
+  Newer → re-fetch, re-extract, overwrite (refresh `last_edited`). Blind spots: same-day edits
+  (day granularity) and plain-web links (no probe) — on a developer hint, or with no probe
+  path, ask, as with `figma-*.md`. A cached extract that lacks something *this* task needs
+  isn't stale, it's incomplete — re-read the source.
 - `notes.md` is a log; it doesn't go stale.
 
 ## Write rule
 
 - Immediately after a reader returns, write its structured output **verbatim** — don't
   re-summarize; later skills need the full fields. Overwrite on re-fetch.
+- `doc-*.md` holds the **extract** (what the task needs), not the page — write it right after
+  reading the source, while the content is at hand.
 - Append to `notes.md` at natural boundaries — approved-plan decisions, provisioned data
   (gids), preview theme, test URLs, confirmed bugs + the hostile values that triggered them.
   One dated `##` entry per event, newest last.
 - Scratch files created while working (test scripts, query drafts, dumps, screenshots) go in
   the workspace `tmp/` — never the project root.
-- **Never** store secrets (tokens, `.env` values) or raw payloads (ADF, Figma node trees) —
+- **Never** store secrets (tokens, `.env` values) or raw payloads (ADF, Figma node trees, full Notion/Confluence pages) —
   only the readers' compact structured outputs.
 
 ## Progress tracking — `progress.md`
@@ -88,6 +104,7 @@ outside the series (ad-hoc flows), the `save-task-context` skill or the session 
 ---
 ticket: ELC-206
 updated: <ISO datetime>
+session: <$CLAUDE_CODE_SESSION_ID of the last session that wrote here>
 ---
 - [ ] write-technical-approach
 - [ ] develop-feature-or-fix
@@ -112,10 +129,18 @@ check each bug off as it's fixed, with its root cause:
 
 - On completing its workflow (final report delivered and, where applicable, approved), a skill
   checks off its row and appends `— <date>, <one-line status>` (branch, PR URL, "QA: 2 blocking
-  bugs", …). Re-runs update the row in place; stamp `updated` on every write.
+  bugs", …). Re-runs update the row in place; stamp `updated` and `session` (from
+  `$CLAUDE_CODE_SESSION_ID`; skip if unset) on every write.
 - **Offering the next step:** offer the first unchecked row (QA failures branch back to the
   implementation flow first). In a fresh session, reading this file replaces the lost
   conversation state — when the developer brings up a ticket that has a workspace, report where
   the series stands and offer the next unchecked step.
+- **Resuming a conversation:** `session` names the conversation that last wrote here. On
+  *"where did we leave off on X?"*, answer from `progress.md` + `notes.md`; if that session
+  isn't the current one (compare `$CLAUDE_CODE_SESSION_ID`), also offer
+  `claude --resume <session>` (run from this project) to reopen it in full. For a detail the
+  workspace didn't capture, that session's transcript sits at
+  `~/.claude/projects/<project-dir-slug>/<session>.jsonl` — pull the last few user/assistant
+  messages from its tail, not the tool dumps.
 
 The folder is a cache: safe to delete at any time; suggest removing it once the ticket is Done.

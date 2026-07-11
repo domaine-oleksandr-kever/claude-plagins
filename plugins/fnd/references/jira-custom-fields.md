@@ -121,8 +121,10 @@ Always request `responseContentFormat: "markdown"`. Then decide **per field** by
   ```
 
   Save the getJiraIssue response to a temp file and decode each ADF field with `--field`; it prints
-  clean markdown (headings, bold/italic/code/links, lists, code blocks, blockquotes, tables) and
-  keeps the bulky raw ADF out of context. `adf-to-md.cjs` is the inverse of `md-to-adf.cjs` (used on
+  clean markdown (headings, bold/italic/code/links, lists, code blocks, blockquotes, tables) —
+  deterministic decoding where hand-walking drops marks and links. (An inline MCP response is
+  already in context either way; only when the harness saved the response to a file does the raw
+  ADF stay out entirely.) `adf-to-md.cjs` is the inverse of `md-to-adf.cjs` (used on
   the write side). A field that is `null` is genuinely empty — report it empty, don't decode.
 
 ## Writing to a custom field — emit ADF (don't send markdown/plain text)

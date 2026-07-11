@@ -57,7 +57,9 @@ the `expand: "names"` fallback + ADF parsing described in
   fields (AC, Assumptions, Technical Approach, Steps to test, Documentation Links) come back as raw
   ADF even then — **decode them with the converter**: save the response to a temp file and run
   `node ${CLAUDE_PLUGIN_ROOT}/scripts/adf-to-md.cjs <file> --field <customfield_id>` per field,
-  rather than hand-walking the JSON (keeps the bulky ADF out of your context).
+  rather than hand-walking the JSON (saves hand-parsing and conversion mistakes; note an inline
+  MCP response is already in your context either way — only a response the harness saved to a
+  file truly stays out).
 - A field that returns `null` after discovery is **genuinely empty** — report it as empty,
   don't invent content.
 - Extract **every external URL** found anywhere in the ticket (description, AC, TA, Documentation

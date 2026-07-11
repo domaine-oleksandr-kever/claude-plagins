@@ -15,6 +15,11 @@ and **`other_links`**, plus any inline links inside `description` / `acceptance_
 smart links — `inlineCard` / `blockCard` / `embedCard` — as `<url>`, so they survive into the
 text). De-duplicate, then read **all** of them — not only the Notion ones.
 
+**Reuse before fetching:** skip links whose content is already in this conversation **in full**
+(not summarized or truncated away) from an earlier workflow run, and links with a **fresh**
+task-workspace copy (`.claude/fnd/<work-id>/doc-<slug>.md` — freshness probe:
+`${CLAUDE_PLUGIN_ROOT}/references/task-workspace.md`). Fetch only what's missing or stale.
+
 ## 2 — Read each link by type
 
 | Link | How to read |
@@ -29,7 +34,16 @@ field/property lists, copy, asset links, constraints — and (for data-model doc
 metafield / metaobject schema, which feeds
 `${CLAUDE_PLUGIN_ROOT}/references/metafield-metaobject-setup.md`.
 
-## 3 — If the Notion MCP isn't configured
+## 3 — Save what you read — the task workspace
+
+After any fresh read, save the **extract** (§2's "what the task needs" — never the raw page) to
+`.claude/fnd/<work-id>/doc-<slug>.md`, frontmatter `url` / `title` / `fetched_at` /
+`last_edited` (+ a `sources:` list of url + last-edited pairs when sub-pages are folded in), so
+later skills and sessions skip the refetch — freshness rules and the cheap probe live in
+`${CLAUDE_PLUGIN_ROOT}/references/task-workspace.md`. A cached extract that lacks something your
+task needs isn't stale, it's incomplete — re-read the source.
+
+## 4 — If the Notion MCP isn't configured
 
 If the ticket has a Notion link but the **Notion MCP isn't connected** (tool calls fail / the
 server is absent), **do not silently skip it** — Notion is usually where the data model and final
@@ -41,7 +55,7 @@ copy live, so proceeding blind risks building the wrong thing. **Stop and notify
 Then wait. The same applies to any other link type whose tool is unavailable — name the
 unreadable links and ask, rather than guessing.
 
-## 4 — Rule of thumb
+## 5 — Rule of thumb
 
 - **Read all links, every type** — Notion is mandatory, but Figma/Confluence/web links are too.
 - **Notion is authoritative for data models & copy** — when it disagrees with the ticket body,
