@@ -51,10 +51,17 @@ A team that prefers a committed rule can put the line in `.gitignore` instead.
   `verified_at` is **older than 24 h** — even mid-session, or (c) the developer hints the
   ticket changed. The check is a cheap probe from the main loop — `getJiraIssue` with
   `fields: ["updated"]` only (tiny response, no subagent): match → stamp `verified_at` and
-  trust the cache (probe at most once per session unless hinted); `updated` ≠ stored
-  `jira_updated` → stale → re-fetch via `jira-reader` and rewrite the file. **Probe
-  unavailable** (Atlassian MCP not connected)? Don't trust silently — tell the developer the
-  cache age ("ticket cached N h ago — use it, or refresh?") and let them decide.
+  trust the cache (probe at most once per session unless hinted).
+- **Probe mismatch ≠ stale.** Jira bumps `updated` on sprint moves, rank, priority,
+  status/assignee flips, estimates, comments — none of which touch what the cache stores.
+  Don't re-fetch blindly: spawn `jira-reader` **passing the stored `jira_updated`** — it
+  checks the changelog first (its freshness mode) and returns either `no_content_change`
+  (→ keep the cache: overwrite `jira_updated` with the new value, fix the `status:` line if
+  it moved, stamp `verified_at` — so the same noise never re-triggers — and tell the
+  developer in one line, e.g. "ticket bump was Sprint ×1, comments — cache still valid") or,
+  when a cached field really changed, the full re-read in the same spawn → rewrite the file.
+- **Probe unavailable** (Atlassian MCP not connected)? Don't trust silently — tell the
+  developer the cache age ("ticket cached N h ago — use it, or refresh?") and let them decide.
 - `figma-*.md`: no cheap version probe exists — when in doubt, ask the developer whether the
   design changed since `fetched_at`.
 - `notes.md` is a log; it doesn't go stale.
