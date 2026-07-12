@@ -51,11 +51,15 @@ returns the links; steps 2 and 6–8 run after the reads return.
 
 ### ✋ Checkpoint — Phase 1
 
-Present the **implementation plan** (with any deep-research findings folded in) and wait for **explicit approval** before writing production code. Once approved, save the plan verbatim to the workspace `plan.md` (`${CLAUDE_PLUGIN_ROOT}/references/task-workspace.md`).
+Present the **implementation plan** (with any deep-research findings folded in) and wait for **explicit approval** before writing production code. Once approved, save the plan verbatim to the workspace `plan.md` (`${CLAUDE_PLUGIN_ROOT}/references/task-workspace.md`). If the context monitor has flagged this session (its banner recommends `/compact`), offer the stronger option — `/clear`, then re-invoke `/fnd:develop-feature-or-fix <ticket>`: Phase 2 resumes from `plan.md`, and an approved plan on disk beats a lossy summary.
 
 ---
 
 ## Phase 2 — Implementation
+
+**Resume path:** the workspace already holds an approved `plan.md` for this ticket (fresh
+session or after `/clear`) → confirm in one line that it's still current and start here —
+don't redo Phase 1.
 
 1. **Provision the store data model** (only if the plan calls for it — step 6) — **before** building the Liquid that reads it, stand up the metafield/metaobject definitions, mock content, and product binding by **following `${CLAUDE_PLUGIN_ROOT}/references/metafield-metaobject-setup.md`** (read it now — it owns both modes' mechanics and the two auth engines, and routes auth failures to the relay blurb). **Mode 1 (store access):** STEP 0 inspection via `${CLAUDE_PLUGIN_ROOT}/scripts/shopify-admin-gql.sh`, diff against the doc, then the create/wire/mock/bind mutations. For image fields, reuse existing store media or have the dev paste a `MediaImage` gid — don't upload by default. **Mode 2 (no store access):** maintain the living `metaobject-setup.graphql` in the task workspace per the reference's step-by-step protocol. End state: a test product that renders the feature.
 2. **Implement** step by step after confirmation — build from the `figma-reader` specs gathered in Phase 1 (re-query Figma MCP only for detail they didn't capture); follow the TA, AC, Foundation rules, Liquid/block patterns, Tailwind/token usage. Two Foundation patterns worth knowing: when a **section must drive its blocks' dimensions/alignment** via CSS variables (`use_section_vars`), follow `${CLAUDE_PLUGIN_ROOT}/references/section-css-variables-pattern.md`; for **JS/TS state**, prefer `data-*` attributes + Tailwind `data-[]:` selectors over `classList`/`style.*` mutation — the repo lints against those (`${CLAUDE_PLUGIN_ROOT}/references/eslint-no-restricted-syntax.md`). Pause at logical milestones for review if the change is large or risky. **`git add` every newly created file immediately after creating it** (snippet, section, `src/entry/*`, locale, doc) so nothing referenced by the code is left untracked; ticket-scoped working files (inspection/setup `.graphql`, dumps) live in the task workspace, not the repo, and are never `git add`ed.
@@ -74,4 +78,4 @@ Present the **implementation plan** (with any deep-research findings folded in) 
 
 ## Next in the series
 
-Check off this workflow's row in the workspace `progress.md` (branch, what shipped), then offer the next unchecked step in one line — normally `/fnd:qa-feature-or-fix <ticket>` — **offer only; never auto-run**. If context is heavy, suggest `/compact` first: the workspace preserves the facts.
+Check off this workflow's row in the workspace `progress.md` (branch, what shipped), then offer the next unchecked step in one line — normally `/fnd:qa-feature-or-fix <ticket>` — **offer only; never auto-run**. If context is heavy, suggest `/clear` + the next command rather than `/compact`: the workspace preserves the facts and the next skill re-ingests them fresh.

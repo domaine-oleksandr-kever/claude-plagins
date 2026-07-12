@@ -26,7 +26,7 @@ Operating mode: **Phase 1 in plan mode** (ingest ticket + implementation context
 
 - Read the ticket via the **`jira-reader` subagent** (Atlassian MCP) — AC, TA, links, attachments; the optional write-back (Phase 2) stays in the main loop.
 - **Never proceed past the ✋ checkpoint** without explicit developer confirmation.
-- Steps must be usable by someone **unfamiliar** with the implementation (clear navigation, **theme-agnostic** paths, expectations). **The tester runs on their OWN theme/environment**, so **never hard-code a preview-theme link** (no `?preview_theme_id=…`, no dev/preview theme name).
+- Output follows the Domaine format — `${CLAUDE_PLUGIN_ROOT}/references/steps-to-test-format.md`: usable by a tester **unfamiliar** with the implementation, on their **OWN** theme (**never a preview-theme link**), deterministic expectations.
 
 ---
 
@@ -40,15 +40,11 @@ Operating mode: **Phase 1 in plan mode** (ingest ticket + implementation context
 
 ## Phase 2 — Generate Steps to Test
 
-1. **Write Steps to Test** following Domaine standards:
-   - **Point testers to the right place, theme-agnostically** — the tester uses **their own theme**, so **don't add a preview-theme link / `?preview_theme_id=…`** and don't name your dev/preview theme. Instead give a **relative storefront path** (e.g. `/products/group-lipglass` when it's known from context), the **template** and **customizer location** (Online Store → which section/block), and markets if relevant — so they reproduce it on whatever theme they're testing.
-   - **Expectations per step** — exact outcomes, copy, layout, settings values, breakpoints.
-   - **Visual aids** — reference Figma frames or screenshots where helpful.
-   - **Edge cases** — boundaries, empty states, error states.
-   - **Audience** — assume the tester is new to this Shopify setup.
-   - **Structure as headings + numbered/bullet steps, not big tables.** A scenario = a short heading + an ordered list of steps with expectations. **Avoid wide GFM tables** — they make the Jira ADF balloon (each cell becomes a nested node) and that large blob is fragile to write back (see step 2). Reserve tables for genuinely tabular, short data.
-
-   Use the appropriate template (**General** vs **Bug**) per `ticket_type`.
+1. **Write Steps to Test** following the Domaine format — read
+   `${CLAUDE_PLUGIN_ROOT}/references/steps-to-test-format.md` now (it owns the writing
+   rules: theme-agnostic navigation, per-step expectations, visual aids, edge cases,
+   headings + steps instead of big tables, and the **General** vs **Bug** template choice
+   per `ticket_type`).
 
 ### ✋ Checkpoint
 
@@ -58,9 +54,8 @@ Present the Steps to Test. Encourage the developer to **walk through** them (men
 
 ## Quality bar
 
-- Full AC coverage.
-- Deterministic steps (no "verify it works" without criteria).
-- Theme-agnostic navigation (relative path / template / customizer location, **not** a preview-theme link) so any tester reproduces it on their own theme.
+Per `${CLAUDE_PLUGIN_ROOT}/references/steps-to-test-format.md` → Quality bar: full AC
+coverage; deterministic steps; theme-agnostic navigation.
 
 ## Next in the series
 

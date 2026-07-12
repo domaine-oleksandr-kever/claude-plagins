@@ -18,7 +18,7 @@ in its own subfolder under `plugins/`:
 │   └── fnd/                      # the Foundation plugin (self-contained)
 │       ├── .claude-plugin/
 │       │   └── plugin.json       # plugin manifest (+ bundled mcpServers)
-│       ├── skills/               # 18 workflow skills (see table below)
+│       ├── skills/               # 19 workflow skills (see table below)
 │       │   ├── develop-feature-or-fix/SKILL.md
 │       │   └── ...
 │       ├── agents/               # subagents the skills delegate to
@@ -61,6 +61,7 @@ To add another plugin later: create `plugins/<name>/` (with its own
 | `qa-feature-or-fix`               | `/fnd:qa-feature-or-fix` |
 | `write-steps-to-test`             | `/fnd:write-steps-to-test` |
 | `create-pull-request`             | `/fnd:create-pull-request` |
+| `ship`                            | `/fnd:ship` |
 | `create-preview-theme`            | `/fnd:create-preview-theme` |
 | `update-preview-theme`            | `/fnd:update-preview-theme` |
 | `pre-commit-review`               | `/fnd:pre-commit-review` |
@@ -251,6 +252,52 @@ codebase reads at once) when the task scope is already clear. The block above is
 - **PR conformance gate.** `create-pull-request` runs the agent with a
   conformance emphasis; a `protected-core` violation (a direct edit to Foundation
   core) is a **blocker** that stops the PR until resolved.
+
+## Auto mode — `/fnd:ship`
+
+One command from a ready ticket to an open PR: `/fnd:ship ELC-206`. It front-loads every
+question into one batched interview, takes a **single approval** on the implementation
+plan + QA checklist, then runs the whole series autonomously — escalating only per an
+explicit blocker contract (missing access, AC contradictions, destructive actions outside
+the pre-authorized list, `protected-core` blockers from the conformance review, scope
+growth beyond the ticket, QA failures that survive the fix cap). The contract lives in
+`references/pipeline-mode.md`.
+
+The conductor session stays thin: the heavy phases run in **fresh-context subagents**
+that re-read the per-ticket workspace, so long runs never depend on what survives context
+compaction. Ship writes the same workspace artifacts and
+ticks the same `progress.md` rows as the solo skills — an interrupted run continues with
+the solo series, no unwinding; re-running `/fnd:ship` reconciles against ground truth
+(git, `gh pr view`, Jira) and resumes.
+
+**When to use which:** the solo series when you want to steer each step (checkpoints,
+offer-next); `/fnd:ship` when the ticket is well-specified (Description + AC + approved
+TA + Figma node) and you want the PR, Steps to Test, and the review-bot round handled
+end-to-end.
+
+```mermaid
+flowchart TD
+    A["/fnd:ship &lt;ticket&gt;"] --> B{"Step 0 — preflight<br/>MCP · CLI · dev server ·<br/>permissions · clean context"}
+    B -- fail --> B0["stop: fix environment<br/>(nothing half-started)"]
+    B -- pass --> C["ingest in parallel<br/>jira-reader · figma-reader · theme-explorer"]
+    C --> D["interview (AskUserQuestion)<br/>ticket-specific + policy set"]
+    D --> E["pipeline.md<br/>decisions + escalation contract"]
+    E --> F{"✋ the only gate<br/>plan + QA checklist"}
+    F -- approved --> G
+    subgraph AUTO["autonomous — each phase = fresh-context subagent; conductor keeps decisions + reports only"]
+        G["implement<br/>(plan-driven)"] --> H["qa — execute the fixed<br/>checklist + break-it"]
+        H -- "blocking fail · cap 2" --> G
+        H -- pass --> I["finalize<br/>review checks → commit"]
+        I --> K["create PR<br/>+ preview theme"]
+        K --> L["write steps to test<br/>(fills the bot wait)"]
+        L --> M{"PR aftercare<br/>CI checks · bot feedback"}
+        M -- "findings · cap 2" --> N["fix if AC-compatible →<br/>refresh preview → verify →<br/>commit + push → reply + resolve"]
+        N --> M
+    end
+    M -- "clean / timebox" --> O["Jira hand-off comment<br/>clickable PR link · edge cases ·<br/>why-nots · open questions"]
+    O --> P["final report<br/>pipeline.md → done"]
+    AUTO -. "blocker classes only" .-> Q(["escalate via AskUserQuestion<br/>answer → continue"])
+```
 
 ## Bundled MCP servers
 

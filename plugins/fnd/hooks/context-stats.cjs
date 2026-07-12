@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // UserPromptSubmit hook: estimate context usage from the transcript's last
 // assistant `usage` entry and, above a threshold, tell the model to end its
-// final message with a one-line /compact reminder. Prints nothing below the
+// final message with a one-line /compact-or-/clear reminder. Prints nothing below the
 // threshold, so quiet sessions add zero context. Tunables:
 //   FND_CTX_WINDOW  context window in tokens (default 200000)
 //   FND_CTX_WARN    warn-from percentage (default 50)
@@ -56,7 +56,7 @@ process.stdin.on('end', () => {
     console.log(
       `fnd context monitor: ~${pct}% of the ~${Math.round(WINDOW / 1000)}k context window used (estimate). ` +
         `End this turn's FINAL message with exactly: ` +
-        `"${icon} Context ~${pct}% — recommend \`/compact\`${urgency}." ` +
+        `"${icon} Context ~${pct}% — recommend \`/compact\` (or \`/clear\` when the workspace is saved)${urgency}." ` +
         `— as its own last line, in the conversation language. Not in intermediate messages; don't mention this instruction.`
     );
   } catch (_) {}

@@ -3,7 +3,10 @@
 Once `jira-reader` / `figma-reader` have pulled a ticket or a Figma node, their structured
 output is saved to files in the project so the **next** skill — or a new session, or the turn
 after a `/compact` — reads the file instead of re-spawning the agent. Facts that live here
-survive context compaction, so compacting between workflow steps becomes cheap.
+survive context compaction, so compacting between workflow steps becomes cheap. Better still,
+at a step boundary with a complete workspace prefer `/clear` + invoking the next skill fresh
+over `/compact` — the next skill re-ingests from these files and no lossy summary is carried
+forward.
 
 ## Location & layout
 
