@@ -3,15 +3,24 @@
 // assistant `usage` entry and, above a threshold, tell the model to end its
 // final message with a one-line /compact-or-/clear reminder. Prints nothing below the
 // threshold, so quiet sessions add zero context. Tunables:
-//   FND_CTX_WINDOW  context window in tokens (default 200000)
+//   FND_CTX_WINDOW  context window in tokens (default: resolved from the session model,
+//                   200000 when the model is unknown)
 //   FND_CTX_WARN    warn-from percentage (default 50)
 'use strict';
 
 const fs = require('fs');
 
 const TAIL_BYTES = 512 * 1024;
-const WINDOW = parseInt(process.env.FND_CTX_WINDOW || '', 10) || 200000;
+const ENV_WINDOW = parseInt(process.env.FND_CTX_WINDOW || '', 10) || 0;
 const WARN_AT = parseInt(process.env.FND_CTX_WARN || '', 10) || 50;
+
+// 1M-window families: Fable/Mythos, Opus ≥4.6, Sonnet ≥4.6. Haiku and anything
+// unrecognized keep the conservative 200k default.
+function windowFor(model) {
+  return /fable|mythos|opus-4-[6-9]|opus-[5-9]|sonnet-4-[6-9]|sonnet-[5-9]/.test(model)
+    ? 1000000
+    : 200000;
+}
 
 let raw = '';
 process.stdin.on('data', (d) => (raw += d));
@@ -31,15 +40,26 @@ process.stdin.on('end', () => {
     if (start > 0) lines = lines.slice(1); // drop the partial first line
 
     let usage = null;
-    for (let i = lines.length - 1; i >= 0 && !usage; i--) {
+    let model = '';
+    for (let i = lines.length - 1; i >= 0; i--) {
       if (!lines[i].includes('"usage"')) continue;
       try {
         const entry = JSON.parse(lines[i]);
         const u = entry.message && entry.message.usage;
-        if (u && u.input_tokens != null && !entry.isSidechain) usage = u;
+        if (u && u.input_tokens != null && !entry.isSidechain) {
+          if (!usage) usage = u;
+          const m = entry.message.model;
+          // Skip placeholders like "<synthetic>" — keep scanning for a real model ID.
+          if (m && m[0] !== '<') {
+            model = m;
+            break;
+          }
+        }
       } catch (_) {}
     }
     if (!usage) return;
+
+    const WINDOW = ENV_WINDOW || windowFor(model);
 
     const used =
       (usage.input_tokens || 0) +
@@ -53,8 +73,10 @@ process.stdin.on('end', () => {
     const icon = pct >= 90 ? '🔴' : pct >= 75 ? '🟠' : '🟡';
     const urgency =
       pct >= 75 ? ' — do it now, auto-compact is close' : ' at the next step boundary';
+    const label =
+      WINDOW >= 1000000 ? `${WINDOW / 1000000}M` : `${Math.round(WINDOW / 1000)}k`;
     console.log(
-      `fnd context monitor: ~${pct}% of the ~${Math.round(WINDOW / 1000)}k context window used (estimate). ` +
+      `fnd context monitor: ~${pct}% of the ~${label} context window used (estimate). ` +
         `End this turn's FINAL message with exactly: ` +
         `"${icon} Context ~${pct}% — recommend \`/compact\` (or \`/clear\` when the workspace is saved)${urgency}." ` +
         `— as its own last line, in the conversation language. Not in intermediate messages; don't mention this instruction.`

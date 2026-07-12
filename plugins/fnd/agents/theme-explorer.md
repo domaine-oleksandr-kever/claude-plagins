@@ -2,6 +2,7 @@
 name: theme-explorer
 description: Read-only scout that maps a Shopify (Foundation/Domaine) theme for a task — locates the relevant sections/snippets/blocks/schemas/locales, surfaces patterns to follow and rule constraints, and returns a compact impact map. Spawn it during planning to keep broad search out of the main context. It scouts breadth; the caller reads the load-bearing files itself.
 model: sonnet
+effort: medium
 tools: Read, Grep, Glob, Bash
 ---
 

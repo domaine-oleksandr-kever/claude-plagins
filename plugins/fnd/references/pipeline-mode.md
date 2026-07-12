@@ -73,6 +73,16 @@ Every non-escalated call goes to the workspace `notes.md` as a dated `pipeline:`
 what was decided, why, and what a reviewer would need in order to undo it. The final
 report and the Jira hand-off comment are distilled from these entries.
 
+## Phase-agent models
+
+Phase agents never inherit the session model — the conductor passes `model` on every
+spawn: `opus` for reasoning-heavy phases (implement, qa, and the fix agents in the qa
+loop and aftercare), `sonnet` for mechanical ones (finalize, steps-to-test). The
+conductor itself stays on the session model — planning, decomposition, and synthesis are
+where it earns its price. Gotcha: a `CLAUDE_CODE_SUBAGENT_MODEL` env var silently
+overrides every pin, including the bundled agents' frontmatter models — it must be unset
+or `inherit`.
+
 ## Phase-start re-read protocol
 
 Every phase — first run or resumed — STARTS by re-reading from disk, unconditionally:

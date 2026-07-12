@@ -133,6 +133,9 @@ this phase consumes), the phase's reference list, its mission, and the standing 
 `pipeline:` entries; on completion write your artifact and tick your `progress.md` row
 (aftercare / jira-hand-off: `pipeline.md` only); your final message is a compact report
 (≤ ~20 lines), never file dumps."*
+**Model tiering:** phase agents never inherit the session model — pass `model` explicitly
+on every spawn: `opus` for implement, qa, and fix agents (qa loop + aftercare); `sonnet`
+for finalize and steps-to-test. The conductor stays on the session model.
 The conductor verifies tick + artifact before advancing, ticks the `pipeline.md` phase
 row, and relays any `ESCALATE` via AskUserQuestion → appends the answer to `pipeline.md`
 → re-spawns the phase (it resumes from the artifacts).

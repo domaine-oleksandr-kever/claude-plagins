@@ -1,7 +1,8 @@
 ---
 name: change-reviewer
 description: Reviews a branch's changed files (Liquid / TS / CSS) against Foundation conventions — comment accuracy, refactor opportunities, and project-rules conformance. Spawn it from the fnd review flow (pre-commit / PR) to keep heavy file-reading out of the main context. Read-only; returns a findings table.
-model: sonnet
+model: opus
+effort: medium
 tools: Read, Grep, Glob, Bash
 ---
 
