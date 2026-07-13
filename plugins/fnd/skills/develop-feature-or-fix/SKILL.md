@@ -51,7 +51,7 @@ returns the links; steps 2 and 6–8 run after the reads return.
 
 ### ✋ Checkpoint — Phase 1
 
-Present the **implementation plan** (with any deep-research findings folded in) and wait for **explicit approval** before writing production code. Once approved, save the plan verbatim to the workspace `plan.md` (`${CLAUDE_PLUGIN_ROOT}/references/task-workspace.md`). If the context monitor has flagged this session (its banner recommends `/compact`), offer the stronger option — `/clear`, then re-invoke `/fnd:develop-feature-or-fix <ticket>`: Phase 2 resumes from `plan.md`, and an approved plan on disk beats a lossy summary.
+Present the **implementation plan** (with any deep-research findings folded in) and wait for **explicit approval** before writing production code. Once approved, save the plan verbatim to the workspace `plan.md` (`${CLAUDE_PLUGIN_ROOT}/references/task-workspace.md`). If the context monitor has flagged this session (its notice recommends `/compact`), offer the stronger option — `/clear`, then re-invoke `/fnd:develop-feature-or-fix <ticket>`: Phase 2 resumes from `plan.md`, and an approved plan on disk beats a lossy summary.
 
 ---
 

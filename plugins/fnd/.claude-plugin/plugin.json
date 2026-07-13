@@ -53,7 +53,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/context-stats.cjs\""
+            "command": "[ \"${FND_CTX_MONITOR:-1}\" = \"1\" ] && node \"${CLAUDE_PLUGIN_ROOT}/hooks/context-stats.cjs\" || true"
           }
         ]
       }

@@ -57,7 +57,7 @@ writes are the workspace cache and `pipeline.md`); Step 4 autonomous.
    truth per `pipeline-mode.md` (progress ticks, `git log`, `gh pr view`, Jira fields),
    then continue from the first genuinely-undone phase (jump to Step 4). `done` /
    `aborted` / absent → fresh run.
-2. **Fresh context.** If the context monitor flagged ≥50% on this prompt (its banner
+2. **Fresh context.** If the context monitor flagged this prompt (its notice
    recommends `/compact`), recommend the stronger option — `/clear` + rerunning
    `/fnd:ship <ticket>`; proceed only if the developer insists.
 3. **Environment** (the `preflight-checks` scope, inline and compact): Atlassian MCP up;

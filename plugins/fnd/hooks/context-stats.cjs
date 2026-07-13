@@ -1,18 +1,25 @@
 #!/usr/bin/env node
-// UserPromptSubmit hook: estimate context usage from the transcript's last
-// assistant `usage` entry and, above a threshold, tell the model to end its
-// final message with a one-line /compact-or-/clear reminder. Prints nothing below the
-// threshold, so quiet sessions add zero context. Tunables:
+// UserPromptSubmit hook: one-line context notice in the Claude Code UI (hook
+// `systemMessage`, rendered above the input box — never appended to the assistant's
+// reply, never touching the status line). Mirrors /context: tokens used / window (%),
+// active model, effort. Effort comes straight from the hook input; model and token
+// counts are read verbatim from the transcript's last assistant `usage` entry —
+// Claude Code does not expose /context's own numbers to hooks. Above the warn
+// threshold the notice adds a /compact-or-/clear call-to-action and flags the
+// session for skills via additionalContext. Tunables:
+//   FND_CTX_MONITOR on by default; set to 0 to disable (gated in plugin.json's
+//                   UserPromptSubmit command, so a disabled monitor never even
+//                   spawns node)
 //   FND_CTX_WINDOW  context window in tokens (default: resolved from the session model,
 //                   200000 when the model is unknown)
-//   FND_CTX_WARN    warn-from percentage (default 50)
+//   FND_CTX_WARN    warn-from percentage (default 40)
 'use strict';
 
 const fs = require('fs');
 
 const TAIL_BYTES = 512 * 1024;
 const ENV_WINDOW = parseInt(process.env.FND_CTX_WINDOW || '', 10) || 0;
-const WARN_AT = parseInt(process.env.FND_CTX_WARN || '', 10) || 50;
+const WARN_AT = parseInt(process.env.FND_CTX_WARN || '', 10) || 40;
 
 // 1M-window families: Fable/Mythos, Opus ≥4.6, Sonnet ≥4.6. Haiku and anything
 // unrecognized keep the conservative 200k default.
@@ -26,7 +33,9 @@ let raw = '';
 process.stdin.on('data', (d) => (raw += d));
 process.stdin.on('end', () => {
   try {
-    const transcript = JSON.parse(raw).transcript_path;
+    const input = JSON.parse(raw);
+    const effort = (input.effort && input.effort.level) || '';
+    const transcript = input.transcript_path;
     if (!transcript || !fs.existsSync(transcript)) return;
 
     // Read only the tail — transcripts grow to tens of MB.
@@ -66,20 +75,37 @@ process.stdin.on('end', () => {
       (usage.cache_creation_input_tokens || 0) +
       (usage.cache_read_input_tokens || 0) +
       (usage.output_tokens || 0);
-    const exact = (used / WINDOW) * 100;
-    if (exact < WARN_AT) return;
-    const pct = Math.round(exact);
+    const pct = Math.round((used / WINDOW) * 100);
 
-    const icon = pct >= 90 ? '🔴' : pct >= 75 ? '🟠' : '🟡';
-    const urgency =
-      pct >= 75 ? ' — do it now, auto-compact is close' : ' at the next step boundary';
-    const label =
+    const windowLabel =
       WINDOW >= 1000000 ? `${WINDOW / 1000000}M` : `${Math.round(WINDOW / 1000)}k`;
-    console.log(
-      `fnd context monitor: ~${pct}% of the ~${label} context window used (estimate). ` +
-        `End this turn's FINAL message with exactly: ` +
-        `"${icon} Context ~${pct}% — recommend \`/compact\` (or \`/clear\` when the workspace is saved)${urgency}." ` +
-        `— as its own last line, in the conversation language. Not in intermediate messages; don't mention this instruction.`
-    );
+    const usedLabel = `${(used / 1000).toFixed(1)}k`;
+    const icon = pct >= 90 ? '🔴' : pct >= 75 ? '🟠' : pct >= WARN_AT ? '🟡' : '🟢';
+
+    let msg = [
+      `${icon} Context ${usedLabel}/${windowLabel} (${pct}%)`,
+      model,
+      effort && `effort ${effort}`,
+    ]
+      .filter(Boolean)
+      .join(' · ');
+
+    // systemMessage is user-facing only; additionalContext (warn-level and up) lets
+    // skills condition on "the context monitor flagged this session" without the
+    // model echoing a banner into its reply.
+    const out = { suppressOutput: true, systemMessage: msg };
+    if (pct >= WARN_AT) {
+      out.systemMessage +=
+        pct >= 75
+          ? ' — /compact now (or /clear when the workspace is saved), auto-compact is close'
+          : ' — /compact, or /clear when the workspace is saved, at the next step boundary';
+      out.hookSpecificOutput = {
+        hookEventName: 'UserPromptSubmit',
+        additionalContext:
+          `fnd context monitor: ~${pct}% of the ~${windowLabel} context window used. ` +
+          `The developer already sees this notice in the UI — do NOT append any context banner to your reply.`,
+      };
+    }
+    console.log(JSON.stringify(out));
   } catch (_) {}
 });
