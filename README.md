@@ -104,7 +104,7 @@ predeclare it in managed settings under `extraKnownMarketplaces`.
 ### Local development (from this folder on disk)
 
 ```text
-/plugin marketplace add /path/to/claude-plagins
+/plugin marketplace add /Users/oleksandrkever/projects/foundation-claude-plagin
 /plugin install fnd@domaine
 /reload-plugins
 ```
