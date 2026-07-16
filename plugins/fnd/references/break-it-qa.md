@@ -17,7 +17,13 @@ ask *"what value or timing breaks this?"* and derive concrete rows from these ca
 - **Timing & races** — interact **before hydration** on a throttled network (change the select before scripts load — is actual DOM state reconciled on connect, or do stale SSR attributes win?); **rapid repeated interaction** (fast variant switching, double-click add-to-cart) — are in-flight requests aborted/superseded so the *last action* wins, not the *slowest response*?
 
 Base the rows on what the diff actually reads and fires (inputs, requests, rendered
-fields) — the categories are lenses, not a fixed list.
+fields) — the categories are lenses, not a fixed list. Two hard rules:
+
+- **No reduced mode.** Every QA run derives and executes the full set for what the diff
+  touches — depth is never an interview/policy question and never offered as an option.
+- **Derive from the final diff, not the plan.** A checklist approved before implementation
+  can't cover interactions that appeared during it — re-derive against the real diff and
+  append the missing rows before executing.
 
 ## Executing the rows
 

@@ -41,6 +41,12 @@ Read each file in your group (the diff + enough surrounding code to judge), then
   - **css / liquid / schema / snippet** convention breaks — severity `warning` (or what
     the rule states). E.g. schemas hand-edited in compiled output instead of authored in
     `schemas/` (TS); snippet params missing LiquidDoc + defaults.
+- **F — correctness escalation (not a hunt).** Deep bug-hunting belongs to the
+  `bug-hunter` agent — but if while reading you spot a potential behavior bug (a race, a
+  re-emitted event, dropped data, a broken merchant invariant), report it as an **F**
+  finding with a concrete failure scenario, severity at least `warning`. Never downgrade
+  it to an aside or "observation only" — an unescalated suspicion dies in the caller's
+  context; the calling skill is required to disposition every F row explicitly.
 - **Confirm passed-in hits** (if any): for each task-number hit (`\b[A-Z]{2,}-\d+\b`),
   confirm it's inside a **comment** (not code/data) before keeping it — and keep Figma node
   ids, SKU codes, URLs, and tech acronyms that happen to match the pattern (`UTF-8`,
@@ -54,9 +60,10 @@ A single findings table, grouped by file:
 | File:line | Check | Severity | Issue | Proposed change |
 |---|---|---|---|---|
 
-- `Check` ∈ {A, C, E} for findings you originate; use `B` (ticket reference) / `D` (untracked
+- `Check` ∈ {A, C, E, F} for findings you originate; use `B` (ticket reference) / `D` (untracked
   referenced file) only to label passed-in hits you confirmed — you never originate those two.
-  `Severity` ∈ {blocker, warning, nit}.
+  `Severity` ∈ {blocker, warning, nit}; `F` rows are never below `warning` and always
+  carry a failure scenario in the Issue column.
 - `protected-core` violations are **always** `blocker`.
 - Each row is one concrete proposed change with a one-line rationale.
 - If nothing is found, return an empty table plus a one-line `no findings in <N> files`.

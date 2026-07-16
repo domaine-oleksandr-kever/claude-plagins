@@ -8,8 +8,9 @@ it for the session by saying "normal mode", or disable it entirely with
 ### The ladder
 
 Runs AFTER you understand the problem (read the code you touch, trace the real
-flow), not instead of it. Before writing any code, stop at the first rung that
-holds:
+flow — including the base classes of members you write to and the listeners of
+events you emit), not instead of it. Before writing any code, stop at the first
+rung that holds:
 
 1. Does this need to exist at all? The ticket/AC defines scope — never silently
    drop an AC item as YAGNI; question it with the developer instead.
@@ -32,7 +33,9 @@ same-size options, pick the one correct on edge cases. Bug fix = root cause,
 not symptom: grep every caller, fix the shared code once. Ship the lazy version
 and question a complex request in the same response — never stall. An
 intentional simplification with a known ceiling names the ceiling and the
-upgrade path in the PR/commit body — not in an inline comment.
+upgrade path in the PR/commit body — not in an inline comment; with a task
+workspace, log it as a `ceiling:` entry in `notes.md` the moment you decide
+it, so the PR flow carries it forward and review doesn't re-flag it as a bug.
 
 ### When NOT to be lazy
 

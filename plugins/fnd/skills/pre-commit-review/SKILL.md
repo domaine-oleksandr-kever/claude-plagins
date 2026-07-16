@@ -1,12 +1,12 @@
 ---
 name: pre-commit-review
-description: Review the branch's changed files before committing — verify every comment is accurate and still matches the code, strip ticket references from comments (Jira task numbers like ELC-123 and ticket-section pointers like "(AC 1a)", "(TA 1a)", "Acceptance Criteria", "Technical Approach"), and surface refactor / cleanup opportunities. Produces a plan the developer approves before any edit. Use when the user is about to commit, says "before commit", asks to tidy/clean a branch, review comments, or check for stale comments / leftover ticket numbers, or invokes /pre-commit-review.
+description: Review the branch's changed files before committing — verify every comment is accurate and still matches the code, strip ticket references from comments (Jira task numbers like ELC-123 and ticket-section pointers like "(AC 1a)", "(TA 1a)", "Acceptance Criteria", "Technical Approach"), surface refactor / cleanup opportunities, and hunt the diff for correctness bugs (bug-hunter agent — races, broken invariants, state divergence). Produces a plan the developer approves before any edit. Use when the user is about to commit, says "before commit", asks to tidy/clean a branch, review comments or check for stale comments / leftover ticket numbers, or asks to review the changes for bugs, or invokes /pre-commit-review.
 ---
 
 # Pre-commit review
 
-Hygiene pass over the changed files **before a commit**. Four checks → a written
-plan → developer approves/corrects → apply. **Never commits** (repo rule: never
+Hygiene **+ correctness** pass over the changed files **before a commit**. Five checks →
+a written plan → developer approves/corrects → apply. **Never commits** (repo rule: never
 `git commit` without explicit per-commit permission).
 
 ## 0. Review-flow gate
@@ -38,7 +38,7 @@ git diff --name-only "$mb"
 Review **only these files** (untracked new files surface via check D). Read each one (the diff +
 enough surrounding code to judge comments).
 
-## 2. Run the four checks
+## 2. Run the five checks
 
 **How the work is split** (per `review-flow.md` — don't read the same files twice):
 
@@ -49,8 +49,14 @@ enough surrounding code to judge comments).
   (≳ 15 files) → one `change-reviewer` per file-group, **in parallel**. Pass each agent its
   file group, the `base`, and the raw B-hits to confirm. Merge its findings table with the
   inline B/D hits into the step-3 plan.
+- **F is delegated to the `bug-hunter` agent, spawned in parallel with the
+  change-reviewer(s)** when the review-flow correctness gate holds (the diff touches
+  JS/TS logic, Liquid control flow, or request handling — pure copy/CSS/locale diffs
+  skip it, say so in one line). Pass it the `base` and the documented `ceiling:` entries
+  from the workspace `notes.md` when a workspace exists. Its findings join the step-3
+  plan as check-F rows, failure scenario included.
 
-The four checks (A and C full definitions live in the agent — their single home):
+The five checks (A, C, and F full definitions live in the agents — their single home):
 
 - **A — Accuracy / staleness** — run by the agent: comments that no longer match the current code.
 - **B — Ticket references.** Flag any reference to the ticket **or its parts** in a comment —
@@ -74,10 +80,14 @@ The four checks (A and C full definitions live in the agent — their single hom
   ```
   then cross-check each untracked path against references in the diff. A referenced-but-untracked
   file breaks the theme on deploy — propose `git add <path>` for each one found.
+- **F — Correctness (bug hunt)** — run by the `bug-hunter` agent: real bugs in how the
+  diff interacts with unchanged code (races, merchant-invariant bypasses, state
+  divergence between sibling paths, base-class traps), each verified with a concrete
+  failure scenario.
 
 ## 3. Present the plan
 
-Print a single review plan grouped by file. **All four checks (A, B, C, D) go in the plan** — each
+Print a single review plan grouped by file. **All five checks (A, B, C, D, F) go in the plan** — each
 row is a concrete proposed change with a one-line rationale. Number the rows sequentially in a
 first `#` column so the developer can reference findings by number:
 
@@ -87,9 +97,13 @@ first `#` column so the developer can reference findings by number:
 | 2 | `src/entry/bar.ts:18` | A (stale) | comment names `oldFn`, code uses `newFn` | update to `newFn` |
 | 3 | `src/entry/bar.ts:30` | C (refactor) | same 5-line block duplicated below | extract `formatLabel()` helper |
 | 4 | `snippets/baz.liquid:7` | D (untracked) | renders `snippets/baz__item.liquid`, file untracked | `git add snippets/baz__item.liquid` |
+| 5 | `src/components/qty.ts:88` | F (correctness) | value setter re-emits `change` → second debounced pass grows the line when the request beats the 300ms debounce | don't touch `value` in the branch; snap the input back |
 
 Then **ask the developer to review and correct** the plan ("remove any you disagree with, add
-anything I missed"). Do not edit yet.
+anything I missed"). **Check-F rows are dispositioned, never dropped** (review-flow.md →
+Correctness findings): the developer picks fix / justify / waive per row; a justification
+becomes a named ceiling — record it as a `ceiling:` entry in the workspace `notes.md`
+(when one exists) so `create-pull-request` carries it into the PR body. Do not edit yet.
 
 ## 4. Apply
 
@@ -102,13 +116,17 @@ workspace, tick `pre-commit-review` in its `progress.md`.
 
 **Write the marker.** After the edits are applied, record the review for this branch so
 `commit` / `create-pull-request` don't redundantly re-review (recompute `diff_hash` so it
-reflects the post-edit state — see `${CLAUDE_PLUGIN_ROOT}/references/review-flow.md` §1):
+reflects the post-edit state — see `${CLAUDE_PLUGIN_ROOT}/references/review-flow.md` §1).
+Include the `correctness_hash` line when check F was handled this pass (bug-hunter ran,
+or the gate said not applicable):
 
 ```bash
 branch=$(git rev-parse --abbrev-ref HEAD)
 diff_hash=$(git diff "$(git merge-base "$base" HEAD)" | git hash-object --stdin)
 { echo "branch=$branch"; echo "base=$base"; echo "diff_hash=$diff_hash"; \
   echo "reviewed_at_head=$(git rev-parse HEAD)"; } > .git/.fnd-review
+# ONLY when check F was handled this pass (bug-hunter ran, or gate: not applicable):
+echo "correctness_hash=$diff_hash" >> .git/.fnd-review
 ```
 
 ## Guardrails

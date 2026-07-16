@@ -23,6 +23,7 @@ in its own subfolder under `plugins/`:
 │       │   └── ...
 │       ├── agents/               # subagents the skills delegate to
 │       │   ├── change-reviewer.md   #  reviews a diff (hygiene + conformance)
+│       │   ├── bug-hunter.md        #  adversarial bug hunt on a diff (correctness)
 │       │   ├── jira-reader.md       #  reads a ticket → structured fields
 │       │   ├── figma-reader.md      #  reads one Figma frame → build spec
 │       │   └── theme-explorer.md    #  scouts the theme → impact map
@@ -218,11 +219,16 @@ Agents differ from skills: a **skill** runs inline in the main conversation and
 steers *your* Claude; an **agent** is a *separate* Claude you hand a task to,
 with its own context — ideal for parallel, sandboxed, or token-heavy subtasks.
 
-**Shipped agents.** This plugin ships four read-only subagents, all used to keep
+**Shipped agents.** This plugin ships five read-only subagents, all used to keep
 heavy/noisy work out of the main context:
 
 - **`change-reviewer`** — reviews a diff (stale comments, refactors, project-rules
   conformance). The review flow fans it out one agent per file-group on large diffs.
+- **`bug-hunter`** — adversarial correctness review of a diff: reads the base classes,
+  event listeners, and sibling paths the change interacts with, and returns verified
+  findings with concrete failure scenarios (races, merchant-invariant bypasses, state
+  divergence). Spawned in parallel with `change-reviewer` (pre-commit), as the PR
+  backstop, and alongside live QA in the ship pipeline.
 - **`jira-reader`** — fetches a Jira ticket via the Atlassian MCP and returns clean
   structured fields (keeps raw ADF out of context).
 - **`figma-reader`** — reads **one** Figma frame via the Figma Dev Mode MCP and returns a
@@ -244,6 +250,12 @@ codebase reads at once) when the task scope is already clear. The block above is
   referenced files) run inline; the judgement checks (stale comments, refactors,
   project-rules conformance) go to the `change-reviewer` agent — one for a small
   diff, one per file-group in parallel for a large one. Each file is read once.
+- **Correctness pass.** When the diff touches JS/TS logic or Liquid control flow, the
+  `bug-hunter` agent runs in parallel — an adversarial hunt for real bugs, each finding
+  carrying a concrete failure scenario. Its primary home is `pre-commit-review`;
+  `create-pull-request` is the backstop (runs it only if the marker shows the pass is
+  missing or stale). Every correctness finding is dispositioned — fixed, justified as a
+  named ceiling in the PR body, or explicitly waived — never silently dropped.
 - **Once per branch.** A tiny branch-keyed marker at `.git/.fnd-review` (never
   committed, auto-overwritten) records that a branch was reviewed. The **first**
   review on a branch runs in full; **later** runs ask the developer

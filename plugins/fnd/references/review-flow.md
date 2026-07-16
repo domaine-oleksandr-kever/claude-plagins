@@ -4,9 +4,9 @@ Single source of truth for the "review the branch's changes" flow used by
 `pre-commit-review`, `commit`, and `create-pull-request`. Those skills reference this
 file instead of duplicating the logic.
 
-The flow has three parts: **(1) a once-per-branch marker**, **(2) how the four checks
-are run** (cheap ones inline, expensive ones delegated to the `change-reviewer` agent),
-and **(3) what to do on entry** (first time vs. subsequent).
+The flow has three parts: **(1) a once-per-branch marker**, **(2) how the checks are
+run** (cheap ones inline, expensive ones delegated to the `change-reviewer` and
+`bug-hunter` agents), and **(3) what to do on entry** (first time vs. subsequent).
 
 ## 1. The marker — `.git/.fnd-review`
 
@@ -22,7 +22,13 @@ branch=<current branch>
 base=<develop|main>
 diff_hash=<hash of the reviewed diff>
 reviewed_at_head=<commit sha at review time>
+correctness_hash=<diff hash when check F was last satisfied — line absent if never>
 ```
+
+`correctness_hash` records that the **correctness pass (check F)** was handled for that
+exact diff — either `bug-hunter` ran, or the correctness gate legitimately said "not
+applicable". Absent or ≠ the current `diff_hash` → the branch's correctness pass is
+missing or stale.
 
 Compute scope + hash:
 
@@ -53,14 +59,17 @@ fi
 ```
 
 Write it (only after a review actually ran — for `pre-commit-review`, **after** its edits
-are applied, so it records the final reviewed state):
+are applied, so it records the final reviewed state; add the `correctness_hash` line only
+when check F was handled this pass):
 
 ```bash
 { echo "branch=$branch"; echo "base=$base"; echo "diff_hash=$diff_hash"; \
   echo "reviewed_at_head=$(git rev-parse HEAD)"; } > .git/.fnd-review
+# ONLY when check F was handled this pass (bug-hunter ran, or gate: not applicable):
+echo "correctness_hash=$diff_hash" >> .git/.fnd-review
 ```
 
-## 2. How the four checks run
+## 2. How the checks run
 
 The cost is **reading the changed files**, which checks A and C (and E) share. So split by
 **files, not by checks**:
@@ -84,11 +93,38 @@ The cost is **reading the changed files**, which checks A and C (and E) share. S
   - Pass each agent: the `base`, its file group, the **emphasis** (see below), and the raw
     B/D hits to confirm.
 
+- **F (correctness) is delegated to the `bug-hunter` agent** — an adversarial pass that
+  hunts for real bugs (races, merchant-invariant bypasses, state divergence between
+  sibling paths, inherited-behavior traps, dropped data). It applies when the
+  **correctness gate** holds:
+
+  > **Correctness gate:** the diff touches JS/TS logic, Liquid control flow, or request
+  > handling. Pure copy / CSS / locale / schema-label diffs skip it — say so in one line
+  > and still record `correctness_hash` (the pass was handled: not applicable).
+
+  Spawn it **in parallel** with the `change-reviewer` agent(s) — same diff, different
+  lens; on a large diff reuse the same file-groups. Pass it the `base`, its file group,
+  and the documented ceilings (`ceiling:` entries from the task workspace `notes.md`)
+  when a workspace exists.
+
 - **Emphasis by caller:**
-  - `pre-commit-review` → `hygiene` (lead A + C).
-  - `create-pull-request` → `conformance` (lead E; `protected-core` = blocker).
+  - `pre-commit-review` → `hygiene` (lead A + C) **+ correctness** — the primary home of
+    check F.
+  - `create-pull-request` → `conformance` (lead E; `protected-core` = blocker) **+
+    correctness backstop** — run `bug-hunter` only when `correctness_hash` is absent or
+    ≠ the current diff hash (the developer skipped `pre-commit-review`, or the diff moved
+    since).
 
 Merge the agent findings with the inline B/D hits into one plan/table for the developer.
+
+### Correctness findings — disposition is mandatory
+
+A finding tagged correctness (check F from `bug-hunter`, or stumbled on by
+`change-reviewer` while reading) is **never "observation only"**. The calling skill must
+close every one explicitly — **fix** it, **justify** it (the justification travels to the
+PR body → Dependencies as a named ceiling), or have the developer **explicitly waive**
+it — and record the disposition (workspace `notes.md` when one exists). A **blocking**
+correctness finding stops a PR the same way a `protected-core` blocker does.
 
 ## 3. On entry — first time vs. subsequent
 
@@ -117,14 +153,18 @@ When asking (subsequent runs), enrich the prompt so the decision is easy:
 
 ### Per-skill entry behaviour
 
-- **`pre-commit-review`** — the primary home of the full review. Applies edits after
-  developer approval, then writes/refreshes the marker.
+- **`pre-commit-review`** — the primary home of the full review, **including check F**
+  (`bug-hunter` in parallel with the `change-reviewer`(s) when the correctness gate
+  holds). Applies edits after developer approval, then writes/refreshes the marker
+  (incl. `correctness_hash`).
 - **`commit`** — does **not** itself run the hygiene review. On entry: if
   `reviewed_before == no`, offer to run `/fnd:pre-commit-review` first (proceed if the dev
   declines); if `yes`, continue to the commit. (Its own untracked-file check still runs.)
 - **`create-pull-request`** — final gate. Run the flow with **`conformance`** emphasis:
-  first time on branch → full; else ask. **Any `protected-core` blocker stops the PR**
-  until resolved or explicitly waived by the developer.
+  first time on branch → full; else ask. Independently of that choice, check the
+  **correctness backstop**: `correctness_hash` absent or stale → apply the gate and run
+  `bug-hunter` before drafting. **Any `protected-core` blocker or blocking correctness
+  finding stops the PR** until resolved or explicitly waived by the developer.
 
 > Optional fast-path: a skill may also print an in-context sentinel
 > (`✓ fnd review · branch=… · <hash>`), but the `.git/` marker is the source of truth.

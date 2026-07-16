@@ -19,7 +19,7 @@ session: <$CLAUDE_CODE_SESSION_ID>
 - commit scope: <ticket key? yes|no> · PR: <draft|ready>
 - preview theme: <auto|manual triplet> · storefront path: </products/…>
 - Jira write-backs via MCP: steps-to-test <yes|no> · PR link <yes|no> · hand-off comment <yes|no>
-- QA depth: <standard|extended break-it> · bots: <names> · bot timebox: <min>
+- bots: <names> · bot timebox: <min>
 ## Ticket answers
 - <question> → <accepted answer> (recommended: <what ship suggested>)
 ## Caps

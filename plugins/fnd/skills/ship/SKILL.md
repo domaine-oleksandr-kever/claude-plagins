@@ -3,7 +3,8 @@ name: ship
 description: >
   Autonomous end-to-end delivery of a ready Jira ticket — the auto-mode alternative to
   running workflows 3–6 solo. One upfront interview + a single plan/QA-checklist approval,
-  then: implement → QA (state-variant matrix + break-it) → finalize (review + commit) →
+  then: implement → QA (state-variant matrix + break-it + adversarial bug hunt) →
+  finalize (review + commit) →
   PR + preview theme → Steps to Test → PR aftercare (CI checks + review bots) → Jira
   hand-off comment, escalating only per an explicit blocker contract. Requires a ticket
   with Description, AC, an approved Technical Approach, and a Figma node. Use when the
@@ -100,9 +101,9 @@ recommended answer. Explore the codebase instead of asking whenever the code can
 - **Policy set:** working branch (stay vs create + name) and PR target branch (default
   `develop`); commit scope (ticket key?); preview theme (auto-create `--reuse` vs manual
   triplet) + storefront path for deep-links; PR **draft vs ready**; Jira write-backs via
-  MCP — Steps to Test field / PR link / hand-off comment (each yes/no); QA depth
-  (standard vs extended break-it); PR bots to await (names) + timebox in minutes;
-  deep-research pressure-test of the plan (default no).
+  MCP — Steps to Test field / PR link / hand-off comment (each yes/no); PR bots to await
+  (names) + timebox in minutes; deep-research pressure-test of the plan (default no).
+  QA depth is **not** a question — break-it always runs the full method.
 
 Write `pipeline.md` per `pipeline-mode.md` (`status: active`, caps, the phase list).
 
@@ -116,7 +117,8 @@ Draft **two artifacts** and present them together:
 - **QA checklist** from the AC — the **state-variant matrix**: every AC-relevant config
   axis × each allowed value × each source that can drive it (customizer AND
   metafield/metaobject when both exist); break-it rows per
-  `${CLAUDE_PLUGIN_ROOT}/references/break-it-qa.md`; design conformance vs the Figma
+  `${CLAUDE_PLUGIN_ROOT}/references/break-it-qa.md` — always the full method, never a
+  reduced depth; design conformance vs the Figma
   specs; accessibility; performance; viewport — the same dimensions solo QA covers.
 
 ✋ Wait for explicit approval (edits welcome). Then save `plan.md` + the checklist into
@@ -146,21 +148,32 @@ row, and relays any `ESCALATE` via AskUserQuestion → appends the answer to `pi
    `section-css-variables-pattern.md`, `eslint-no-restricted-syntax.md`,
    `theme-customizer-state.md`. In-browser validation vs design + AC (Chrome DevTools
    MCP), data/customizer state walks via the runners, `git add` every new file, test
-   paths / gids → `notes.md`.
-2. **qa** — a fresh agent that did NOT implement. Brief: execute `qa.md` verbatim +
-   `break-it-qa.md` → Executing the rows; state walks through
-   `${CLAUDE_PLUGIN_ROOT}/scripts/shopify-admin-gql.sh` /
+   paths / gids / `ceiling:` entries for intentional simplifications → `notes.md`.
+2. **qa** — a fresh agent that did NOT implement, **plus a parallel `bug-hunter` spawn**
+   over the final diff (pass the base branch and the `notes.md` `ceiling:` entries) —
+   live QA can't reproduce timing races on a slow local proxy; the static hunt covers
+   them from the code. The qa agent's brief: **first extend `qa.md`** with break-it rows
+   derived from the *final diff* per `break-it-qa.md` → Deriving the rows (interactions
+   added during implementation aren't in the gate-approved checklist — append them,
+   marked `post-plan`), then execute `qa.md` verbatim + `break-it-qa.md` → Executing the
+   rows; state walks through `${CLAUDE_PLUGIN_ROOT}/scripts/shopify-admin-gql.sh` /
    `${CLAUDE_PLUGIN_ROOT}/scripts/theme-json.sh` (snapshot → mutate → verify →
    **restore**); evidence per row; append the pass/fail report + findings with exact
-   repro values to `qa.md`, blocking vs non-blocking.
-   **QA loop:** blocking findings → a fix agent scoped to them → a fresh qa agent
-   re-runs the affected rows; **cap 2 cycles**, then ESCALATE with the report.
+   repro values to `qa.md`, blocking vs non-blocking. Merge the `bug-hunter` findings
+   into the same triage — every one **dispositioned** (fix / justify → `ceiling:` entry +
+   PR body / ESCALATE), never dropped.
+   **QA loop:** blocking findings (either source) → a fix agent scoped to them → a fresh
+   qa agent re-runs the affected rows (a fixed bug-hunter finding is re-verified by code
+   read when it can't be reproduced live); **cap 2 cycles**, then ESCALATE with the report.
 3. **finalize** — review + commit in one pass. Review per
    `${CLAUDE_PLUGIN_ROOT}/references/review-flow.md` with `hygiene` emphasis
    (`change-reviewer` subagent(s)); apply the objective classes (comment accuracy,
    ticket-ref stripping, untracked referenced files) — C-class refactor findings are NOT
    applied autonomously (the change already passed QA); log them to `notes.md` for the
-   report and hand-off. Stamp `.git/.fnd-review`. Commit
+   report and hand-off. **F-class (correctness) findings never land in that log-only
+   bucket**: an F row from the reviewer → fix it (counts toward the qa cap) or ESCALATE.
+   Stamp `.git/.fnd-review` **including `correctness_hash`** — the bug hunt ran in the
+   qa phase; recompute the hash after any finalize edits. Commit
    per `${CLAUDE_PLUGIN_ROOT}/references/commit-message-format.md` (scope per policy;
    body from plan + notes), then push the working branch. Tick **both**
    `pre-commit-review` and `commit` rows.
@@ -172,7 +185,8 @@ row, and relays any `ESCALATE` via AskUserQuestion → appends the answer to `pi
    `change-reviewer` with `conformance` emphasis — a `protected-core` blocker →
    ESCALATE. Body per `${CLAUDE_PLUGIN_ROOT}/skills/create-pull-request/REFERENCE.md`
    (Summary → Jira ticket(s) →
-   theme-preview table in the top third; title `[ELC-XX][Type] …`).
+   theme-preview table in the top third; title `[ELC-XX][Type] …`; named ceilings from
+   the `notes.md` `ceiling:` entries → Dependencies).
    `gh pr create --base <target>` (`--draft` per policy) `--body-file <tmp>`.
    **Record the PR URL to `progress.md` + `notes.md` the moment it exists.**
 5. **steps-to-test** — agent; fills the bot wait. Write per

@@ -35,7 +35,10 @@ Then the remaining sections (adapt headings if a team template exists; their rel
 - **Screenshots / visual evidence** — captures, Figma frames, or DevTools validation notes. If none, say "N/A — non-visual change" or state what was verified.
 - **Accessibility** — WCAG-oriented notes (keyboard, semantics, contrast), or "None".
 - **Performance** — rendering, assets, LCP/CLS touchpoints, or "None".
-- **Dependencies** — other PRs, env vars, merchant setup, post-merge steps.
+- **Dependencies** — other PRs, env vars, merchant setup, post-merge steps, and **named
+  ceilings**: every intentional simplification with a known ceiling (workspace `notes.md`
+  `ceiling:` entries, justified correctness findings) with its upgrade path — lean-code
+  requires the ceiling named here, not in an inline comment.
 - **Checklist** — self-review complete, tested locally, no console errors in happy path, a11y spot-check if UI changed.
 
 ## Preview theme — auto-create or manual
