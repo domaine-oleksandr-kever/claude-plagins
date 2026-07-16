@@ -20,7 +20,7 @@ session: <$CLAUDE_CODE_SESSION_ID>
 - preview theme: <auto|manual triplet> · storefront path: </products/…>
 - Jira write-backs via MCP: steps-to-test <yes|no> · PR link <yes|no> · hand-off comment <yes|no>
 - bots: <names> · bot timebox: <min>
-- store data: <gap → resolution: existing on <product> | mock on <product> | static-only> (one per audit gap)
+- store data: <gap → resolution: existing on <product> | mock on <product> | Mode 2 (.graphql, dev-run pre-gate) | static-only> (one per audit gap)
 ## Ticket answers
 - <question> → <accepted answer> (recommended: <what ship suggested>)
 ## Caps

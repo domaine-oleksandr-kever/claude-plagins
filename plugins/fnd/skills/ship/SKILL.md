@@ -69,8 +69,7 @@ writes are the workspace cache and `pipeline.md`); Step 4 autonomous.
    **not** a stop: record the access level (full / read-only / none — `theme-json.sh`
    still works via the Theme Access token) plus the exact fix the runner prints; Step 2
    turns it into a question — apply the fix, or run data work in **Mode 2**
-   (`metafield-metaobject-setup.md`: mutations handed to the developer as the living
-   `.graphql` file for the GraphiQL App). What kills runs is discovering a dead runner
+   (`metafield-metaobject-setup.md`). What kills runs is discovering a dead runner
    mid-QA — classify it here.
 4. **Permissions.** List the side-effect commands this run will execute — `git commit`,
    `git push`, `gh pr create`, `${CLAUDE_PLUGIN_ROOT}/scripts/*.sh`,
@@ -109,8 +108,9 @@ catalog scan — and write the map to `notes.md` as `store-data:` entries: requi
 **present** (+ the concrete product/entity handle that carries it — that's the QA
 target), **definition-only** (schema exists, no values), or **missing**. No/partial
 admin access → audit what you still can (theme code, `theme-json.sh` state, public
-storefront endpoints like `/products/<handle>.js` — they expose selling plans and
-metafield-driven markup without Admin API) and mark the rest **unverified**. Every gap
+storefront endpoints: `/products/<handle>.js` exposes `selling_plan_groups`, while
+metafield-driven markup shows only in the rendered page HTML, not in that payload) and
+mark the rest **unverified**. Every gap
 or unverified entry becomes a Step 2 interview question — never a mid-run escalation.
 
 ## Step 2 — Interview (batched, once)
@@ -121,12 +121,14 @@ recommended answer. Explore the codebase instead of asking whenever the code can
 - **Ticket-specific:** the design-tree walk develop does one-at-a-time — batched here:
   AC ambiguities, component/pattern choices, data-source decisions; **every store-data
   gap from the audit**, one question each with your recommended answer — provision mock
-  data (say on which product and with what values; the default when store access exists,
+  data (say on which product and with what values; the default when **write** access
+  exists — on a read-only store recommend existing data or Mode 2 instead;
   snapshot → restore per the references) vs the developer points at existing data
   (product/URL — e.g. "subscriptions live on /products/lip-pencil") vs **Mode 2**: you
-  prepare the queries/mutations as the living `.graphql` file and the developer runs it
-  in the GraphiQL App **before the ✋** (the data must exist when Step 4 starts — the
-  autonomous run can't pause for manual execution) vs static-only validation for those
+  prepare the queries/mutations as the living `.graphql` file and the whole exchange —
+  the developer runs each step in the GraphiQL App and pastes the returned ids back —
+  **completes before the ✋** (the data must exist when Step 4 starts; the autonomous
+  run can't pause for manual execution) vs static-only validation for those
   QA rows (named in the checklist, never silently skipped).
 - **Policy set:** working branch (stay vs create + name) and PR target branch (default
   `develop`); commit scope (ticket key?); preview theme (auto-create `--reuse` vs manual
