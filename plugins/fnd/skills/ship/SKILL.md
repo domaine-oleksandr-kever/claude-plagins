@@ -64,7 +64,10 @@ writes are the workspace cache and `pipeline.md`); Step 4 autonomous.
 3. **Environment** (the `preflight-checks` scope, inline and compact): Atlassian MCP up;
    Figma MCP when designs are involved; Chrome DevTools MCP + the local dev server
    (`${CLAUDE_PLUGIN_ROOT}/references/preflight-checklist.md`); `gh auth status`;
-   Shopify CLI present.
+   Shopify CLI present; **store access** — one cheap read through
+   `${CLAUDE_PLUGIN_ROOT}/scripts/shopify-admin-gql.sh` (e.g. shop name): `error=` →
+   relay the exact fix the runner prints and stop (an unauthorized runner discovered
+   mid-QA kills the run; the theme-json.sh fallback alone can't provision data).
 4. **Permissions.** List the side-effect commands this run will execute — `git commit`,
    `git push`, `gh pr create`, `${CLAUDE_PLUGIN_ROOT}/scripts/*.sh`,
    `node ${CLAUDE_PLUGIN_ROOT}/scripts/md-to-adf.cjs` — and confirm with the developer
@@ -91,13 +94,30 @@ or metaobjects, plan the provisioning per
 load-bearing files `theme-explorer` points to yourself — the plan is built from real
 understanding, not the scout's summary.
 
+**Store-data audit** — the classic mid-run killer is discovering during QA that no
+product on the dev store carries the data the feature needs. From the ticket + TA + the
+theme code the change touches, list every store-data dependency needed to **build and to
+QA**: metafield/metaobject definitions AND actual values, selling plan groups
+(subscriptions), bundle configuration, target products/collections/pages, template
+assignments, app-owned records. Probe each with read-only queries via
+`${CLAUDE_PLUGIN_ROOT}/scripts/shopify-admin-gql.sh` — targeted queries, not a full
+catalog scan — and write the map to `notes.md` as `store-data:` entries: requirement →
+**present** (+ the concrete product/entity handle that carries it — that's the QA
+target), **definition-only** (schema exists, no values), or **missing**. Every gap
+becomes a Step 2 interview question — never a mid-run escalation.
+
 ## Step 2 — Interview (batched, once)
 
 AskUserQuestion, ≤4 questions per call, 2–3 calls; every question carries your
 recommended answer. Explore the codebase instead of asking whenever the code can answer.
 
 - **Ticket-specific:** the design-tree walk develop does one-at-a-time — batched here:
-  AC ambiguities, component/pattern choices, data-source decisions.
+  AC ambiguities, component/pattern choices, data-source decisions; **every store-data
+  gap from the audit**, one question each with your recommended answer — provision mock
+  data (say on which product and with what values; the default when store access exists,
+  snapshot → restore per the references) vs the developer points at existing data
+  (product/URL — e.g. "subscriptions live on /products/lip-pencil") vs static-only
+  validation for those QA rows (named in the checklist, never silently skipped).
 - **Policy set:** working branch (stay vs create + name) and PR target branch (default
   `develop`); commit scope (ticket key?); preview theme (auto-create `--reuse` vs manual
   triplet) + storefront path for deep-links; PR **draft vs ready**; Jira write-backs via
@@ -116,7 +136,9 @@ Draft **two artifacts** and present them together:
   provisioning included; deviations from the TA called out.
 - **QA checklist** from the AC — the **state-variant matrix**: every AC-relevant config
   axis × each allowed value × each source that can drive it (customizer AND
-  metafield/metaobject when both exist); break-it rows per
+  metafield/metaobject when both exist); every data-driven row names its **QA target**
+  (product/entity handle) from the store-data audit — rows resolved as static-only are
+  marked so; break-it rows per
   `${CLAUDE_PLUGIN_ROOT}/references/break-it-qa.md` — always the full method, never a
   reduced depth; design conformance vs the Figma
   specs; accessibility; performance; viewport — the same dimensions solo QA covers.
@@ -143,7 +165,9 @@ row, and relays any `ESCALATE` via AskUserQuestion → appends the answer to `pi
 → re-spawns the phase (it resumes from the artifacts).
 
 1. **implement** — one agent per plan milestone, sequential. Brief: the milestone from
-   `plan.md`, the AC, `figma-<node>.md` specs; references:
+   `plan.md`, the AC, `figma-<node>.md` specs, the `store-data:` map + interview answers
+   from `notes.md` (provision the approved mock data first — the audit already named the
+   products and values); references:
    `metafield-metaobject-setup.md` (provision first when planned),
    `section-css-variables-pattern.md`, `eslint-no-restricted-syntax.md`,
    `theme-customizer-state.md`. In-browser validation vs design + AC (Chrome DevTools
@@ -156,7 +180,10 @@ row, and relays any `ESCALATE` via AskUserQuestion → appends the answer to `pi
    derived from the *final diff* per `break-it-qa.md` → Deriving the rows (interactions
    added during implementation aren't in the gate-approved checklist — append them,
    marked `post-plan`), then execute `qa.md` verbatim + `break-it-qa.md` → Executing the
-   rows; state walks through `${CLAUDE_PLUGIN_ROOT}/scripts/shopify-admin-gql.sh` /
+   rows; **QA targets (products/entities) come from the `store-data:` map in
+   `notes.md`** — never rediscover them by scanning the store; a data gap the audit
+   missed → ESCALATE, don't improvise; state walks through
+   `${CLAUDE_PLUGIN_ROOT}/scripts/shopify-admin-gql.sh` /
    `${CLAUDE_PLUGIN_ROOT}/scripts/theme-json.sh` (snapshot → mutate → verify →
    **restore**); evidence per row; append the pass/fail report + findings with exact
    repro values to `qa.md`, blocking vs non-blocking. Merge the `bug-hunter` findings
