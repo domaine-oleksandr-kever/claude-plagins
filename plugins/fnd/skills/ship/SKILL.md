@@ -132,7 +132,9 @@ recommended answer. Explore the codebase instead of asking whenever the code can
   QA rows (named in the checklist, never silently skipped).
 - **Policy set:** working branch (stay vs create + name) and PR target branch (default
   `develop`); commit scope (ticket key?); preview theme (auto-create `--reuse` vs manual
-  triplet) + storefront path for deep-links; PR **draft vs ready**; Jira write-backs via
+  triplet) + storefront path for deep-links; PR **end state — draft vs ready** (the PR
+  is always *created* ready-for-review: review bots skip drafts; `draft` means aftercare
+  flips it back once the bot rounds are done); Jira write-backs via
   MCP — Steps to Test field / PR link / hand-off comment (each yes/no); PR bots to await
   (names) + timebox in minutes; deep-research pressure-test of the plan (default no).
   QA depth is **not** a question — break-it always runs the full method.
@@ -226,7 +228,9 @@ row, and relays any `ESCALATE` via AskUserQuestion → appends the answer to `pi
    (Summary → Jira ticket(s) →
    theme-preview table in the top third; title `[ELC-XX][Type] …`; named ceilings from
    the `notes.md` `ceiling:` entries → Dependencies).
-   `gh pr create --base <target>` (`--draft` per policy) `--body-file <tmp>`.
+   `gh pr create --base <target> --body-file <tmp>` — **never `--draft`**, even when the
+   policy's end state is draft: review bots (Bugbot) don't scan drafts, and aftercare
+   needs their feedback; the end-state policy is applied by aftercare.
    **Record the PR URL to `progress.md` + `notes.md` the moment it exists.**
 5. **steps-to-test** — agent; fills the bot wait. Write per
    `${CLAUDE_PLUGIN_ROOT}/references/steps-to-test-format.md` from the AC + `qa.md` +
@@ -242,7 +246,10 @@ row, and relays any `ESCALATE` via AskUserQuestion → appends the answer to `pi
    untouched), re-verify the touched flow in the browser, commit + push. Reply to
    **every** thread (what was done / why not) and resolve it (`gh api graphql`,
    `resolveReviewThread`). **Cap 2 rounds** → ESCALATE survivors. Timebox expiry with
-   silent bots → "bots pending" in the report; move on.
+   silent bots → "bots pending" in the report; move on. **Last, apply the PR end-state
+   policy** — on both exits (bot rounds done AND timebox expiry): `draft` →
+   `gh pr ready --undo <pr>` flips the now-reviewed PR to draft (log to `notes.md`);
+   `ready` → leave as-is.
 7. **jira-hand-off** — policy allows → one ticket comment: a **clickable PR link** + the
    distilled judgment calls from `notes.md` (accepted edge cases, anything not
    implemented and why, open questions), converted via `md-to-adf.cjs --no-tables` →

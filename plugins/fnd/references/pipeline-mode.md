@@ -16,7 +16,7 @@ session: <$CLAUDE_CODE_SESSION_ID>
 ---
 ## Policy answers
 - working branch: <existing|create + name> · target branch: <develop|main|…>
-- commit scope: <ticket key? yes|no> · PR: <draft|ready>
+- commit scope: <ticket key? yes|no> · PR end state: <draft|ready> (always created ready — bots skip drafts)
 - preview theme: <auto|manual triplet> · storefront path: </products/…>
 - Jira write-backs via MCP: steps-to-test <yes|no> · PR link <yes|no> · hand-off comment <yes|no>
 - bots: <names> · bot timebox: <min>
