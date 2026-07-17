@@ -7,6 +7,7 @@ The message rules shared by `/fnd:commit` and the pipeline finalize phase —
 
 - **Write the entire commit message in English** (subject, body, and footers), regardless of the conversation language.
 - **Never add a Claude/Co-Authored-By signature or any AI attribution** to the commit message.
+- **Never bypass git hooks** — no `--no-verify` / `-n`, in any flow (auto pipeline or manual skill run). Hooks are quality gates. If a hook fails on a pre-existing repo defect your change didn't touch, report it to the developer (auto flows: ESCALATE) instead of bypassing — only the developer may bypass, by hand.
 - Subject line: lowercase after the type, no trailing period, imperative mood, ≤ 72 chars.
 
 ## Format
