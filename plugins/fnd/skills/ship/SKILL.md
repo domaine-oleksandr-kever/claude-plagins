@@ -137,7 +137,8 @@ recommended answer. Explore the codebase instead of asking whenever the code can
   bots skip drafts; `draft` means aftercare flips it back once the bot rounds are done —
   so the developer looks at a bot-reviewed PR before it reads as ready); Jira write-backs via
   MCP — Steps to Test field / PR link / hand-off comment (each yes/no); PR bots to await
-  (names) + timebox in minutes; deep-research pressure-test of the plan (default no).
+  (names — before recommending "none", probe recent repo PRs for bot reviewers via
+  `gh api`) + timebox in minutes; deep-research pressure-test of the plan (default no).
   QA depth is **not** a question — break-it always runs the full method.
 
 Write `pipeline.md` per `pipeline-mode.md` (`status: active`, caps, the phase list).
@@ -247,7 +248,12 @@ row, and relays any `ESCALATE` via AskUserQuestion → appends the answer to `pi
    untouched), re-verify the touched flow in the browser, commit + push. Reply to
    **every** thread (what was done / why not) and resolve it (`gh api graphql`,
    `resolveReviewThread`). **Cap 2 rounds** → ESCALATE survivors. Timebox expiry with
-   silent bots → "bots pending" in the report; move on. **Last, apply the PR end-state
+   silent bots → "bots pending" in the report; move on. **Final thread sweep —
+   unconditional**, even when the policy says no bots / timebox 0: no earlier than
+   ~5 min after PR creation, re-poll the review threads once — bots post minutes after
+   the PR opens, and a `skipping`/absent check is not proof of no review. New threads →
+   run a bot round on them (caps apply); out of cap → report them as pending — never
+   report "no threads" from a poll that raced the bot. **Last, apply the PR end-state
    policy** — on both exits (bot rounds done AND timebox expiry): `draft` →
    `gh pr ready --undo <pr>` flips the now-reviewed PR to draft (log to `notes.md`);
    `ready` → leave as-is.
