@@ -6,6 +6,10 @@ their **own** theme/environment.
 
 ## Writing rules
 
+- **No document title.** Don't open with a heading like
+  `Steps to Test — ELC-104: MAC Pro Member Pricing Display` — the Jira field is already
+  labeled and shown on the ticket, so a title only repeats the ticket key/summary. Start
+  directly with the first scenario heading (or preconditions).
 - **Point testers to the right place, theme-agnostically** — the tester uses **their own
   theme**, so **never hard-code a preview-theme link** (no `?preview_theme_id=…`, no
   dev/preview theme name). Give a **relative storefront path** (e.g.
