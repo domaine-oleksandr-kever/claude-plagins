@@ -132,9 +132,10 @@ recommended answer. Explore the codebase instead of asking whenever the code can
   QA rows (named in the checklist, never silently skipped).
 - **Policy set:** working branch (stay vs create + name) and PR target branch (default
   `develop`); commit scope (ticket key?); preview theme (auto-create `--reuse` vs manual
-  triplet) + storefront path for deep-links; PR **end state — draft vs ready** (the PR
-  is always *created* ready-for-review: review bots skip drafts; `draft` means aftercare
-  flips it back once the bot rounds are done); Jira write-backs via
+  triplet) + storefront path for deep-links; PR **end state — draft vs ready** (default
+  and recommended answer: `draft`; the PR is always *created* ready-for-review: review
+  bots skip drafts; `draft` means aftercare flips it back once the bot rounds are done —
+  so the developer looks at a bot-reviewed PR before it reads as ready); Jira write-backs via
   MCP — Steps to Test field / PR link / hand-off comment (each yes/no); PR bots to await
   (names) + timebox in minutes; deep-research pressure-test of the plan (default no).
   QA depth is **not** a question — break-it always runs the full method.
