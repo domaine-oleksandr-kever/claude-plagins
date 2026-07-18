@@ -49,8 +49,9 @@ Read each file in your group (the diff + enough surrounding code to judge), then
   context; the calling skill is required to disposition every F row explicitly.
 - **Confirm passed-in hits** (if any): for each task-number hit (`\b[A-Z]{2,}-\d+\b`),
   confirm it's inside a **comment** (not code/data) before keeping it — and keep Figma node
-  ids, SKU codes, URLs, and tech acronyms that happen to match the pattern (`UTF-8`,
-  `SHA-256`, `ISO-8601`); those aren't ticket references. For each untracked candidate,
+  ids, SKU codes, URLs, real schema labels, and tech acronyms that happen to match the
+  pattern (`UTF-8`, `SHA-256`, `ISO-8601`); those aren't ticket references (this list is
+  the whitelist's single home). For each untracked candidate,
   confirm the diff actually references it.
 
 ## Output — your final message, data only

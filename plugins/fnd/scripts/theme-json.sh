@@ -23,7 +23,10 @@
 #              is available, with a note on stderr.
 #
 # SAFETY: `set` hard-refuses the live theme (role MAIN / live) on every engine — that is
-# merchant-owned content; a human changes it in the customizer. Write only to development/
+# merchant-owned content; a human changes it in the customizer. The role check runs
+# immediately before each write but check→write is not atomic: a human publishing the
+# target theme in that seconds-wide window slips past — a documented residual risk.
+# Write only to development/
 # unpublished themes, and follow the snapshot protocol (files in a temp dir, never the repo):
 #   1. get  --out snapshot.json          # pristine copy (raw — restores byte-exact)
 #   2. edit a working copy               # get --strip-comments first; then jq
@@ -31,7 +34,7 @@
 #   4. set  --from snapshot.json         # restore
 #
 # Usage:
-#   theme-json.sh themes [--role main|development|unpublished|live]
+#   theme-json.sh themes [--role main|development|unpublished|live|demo]
 #   theme-json.sh get  --theme <id|gid> --file <path/in/theme.json> [--out <file>] [--strip-comments]
 #   theme-json.sh set  --theme <id|gid> --file <path/in/theme.json> --from <file>
 # Common: [--store <name|domain>] [--engine auto|store|token|themecli] [--env <path>]
@@ -79,6 +82,10 @@ while [ $# -gt 0 ]; do
   esac
 done
 case "$ENGINE" in auto|store|token|themecli) ;; *) echo "error=invalid_engine engine=$ENGINE (use auto|store|token|themecli)" >&2; exit 2 ;; esac
+# validate --role at parse time — a typo (`--role dev`) must not read as "no themes", exit 0
+case "$ROLE_FILTER" in ''|main|development|unpublished|live|demo|MAIN|DEVELOPMENT|UNPUBLISHED|LIVE|DEMO) ;;
+  *) echo "error=invalid_role role=$ROLE_FILTER (use main|development|unpublished|live|demo)" >&2; exit 2 ;;
+esac
 
 RUNNER_ARGS=()
 [ -n "$STORE_ARG" ] && RUNNER_ARGS+=(--store "$STORE_ARG")
@@ -116,7 +123,10 @@ emit_file() {
     fi
   }
   if [ -n "$OUT" ]; then
-    filter "$1" > "$OUT"
+    # a failed snapshot write must be a hard stop — the snapshot→mutate→restore protocol
+    # has nothing to restore from if this silently fails
+    filter "$1" > "$OUT" \
+      || { echo "error=out_write_failed out=$OUT (no snapshot written — do NOT proceed to mutate)" >&2; exit 5; }
     echo "ok=saved file=$FILE out=$OUT bytes=$(wc -c < "$OUT" | tr -d ' ')" >&2
   else
     filter "$1"; echo
@@ -133,12 +143,18 @@ live_refuse() { # $1 name
 # credentials missing/insufficient AND a Theme Access token exists); exits on hard failures.
 GQL_NOTE=""
 gql() {
-  local qf rerr rc=0
-  qf="$(mktemp)"; rerr="$(mktemp)"; CLEAN+=("$qf" "$rerr")
+  local qf vf rerr rc=0
+  qf="$(mktemp)"; vf="$(mktemp)"; rerr="$(mktemp)"; CLEAN+=("$qf" "$vf" "$rerr")
   printf '%s\n' "$1" > "$qf"
-  RESP="$("$RUNNER" --query "$qf" --variables "$2" ${RUNNER_ARGS[@]+"${RUNNER_ARGS[@]}"} 2>"$rerr")" || rc=$?
+  # variables ride a file, not argv — a whole settings_data.json body can exceed the
+  # kernel's per-argument limit (MAX_ARG_STRLEN) and die as "Argument list too long"
+  printf '%s' "$2" > "$vf"
+  RESP="$("$RUNNER" --query "$qf" --variables-file "$vf" ${RUNNER_ARGS[@]+"${RUNNER_ARGS[@]}"} 2>"$rerr")" || rc=$?
   if [ "$rc" -ne 0 ]; then
-    if [ "$ENGINE" = "auto" ] && [ "$rc" -eq 3 ] && cli_token_ready; then
+    # fall back only on "neither admin engine set up" — the runner also exits 3 for
+    # store_execute_failed_mutation, where a themecli re-push could double-apply
+    if [ "$ENGINE" = "auto" ] && [ "$rc" -eq 3 ] && grep -q 'error=no_admin_token' "$rerr" \
+        && cli_token_ready; then
       GQL_NOTE="admin credentials not set up"
       return 1
     fi
@@ -163,14 +179,15 @@ gql() {
   fi
 }
 
-# role filter applied inside each engine fn so `themes` streams straight to stdout (no capture)
+# role filter applied inside each engine fn so `themes` streams straight to stdout (no capture);
+# the user's `live` is already normalized to the GraphQL enum MAIN at dispatch
 role_filter() {
   if [ -n "$ROLE_FILTER" ]; then jq -c --arg r "$ROLE_FILTER" 'select(.role == ($r | ascii_upcase))'
   else cat; fi
 }
 
 gql_themes_lines() {
-  gql 'query FndThemesList { themes(first: 50) { nodes { id name role } } }' '{}' || return 1
+  gql 'query FndThemesList { themes(first: 250) { nodes { id name role } } }' '{}' || return 1
   printf '%s' "$RESP" | jq -c '.data.themes.nodes[]' | role_filter
 }
 

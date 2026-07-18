@@ -114,12 +114,12 @@ session: <$CLAUDE_CODE_SESSION_ID of the last session that wrote here>
 - [ ] qa-feature-or-fix
 - [ ] pre-commit-review
 - [ ] commit
-- [ ] create-pull-request
 - [ ] write-steps-to-test
+- [ ] create-pull-request
 ```
 
 For a **batch** (`<work-id>` = branch slug) the rows are the tickets plus the same shared tail
-(pre-commit-review → … → write-steps-to-test) — check each bug off as it's fixed, with its root
+(pre-commit-review → … → create-pull-request) — check each bug off as it's fixed, with its root
 cause: `- [x] ELC-301 — 2026-07-11, fixed: self-reference skipped in bundle resolve`.
 
 - On completing its workflow (final report delivered and, where applicable, approved), a skill

@@ -2,7 +2,7 @@
 
 Domaine's **Agentic Assisted Development** skills for Claude Code, packaged as a
 plugin. It bundles the Foundation workflow skills (technical approach → develop →
-QA → PR, plus multi-brand CSS, translations, breaking-changes, etc.) for Shopify
+QA → PR, plus translations, breaking-changes, preview themes, etc.) for Shopify
 theme work.
 
 ## What's inside
@@ -18,7 +18,7 @@ in its own subfolder under `plugins/`:
 │   └── fnd/                      # the Foundation plugin (self-contained)
 │       ├── .claude-plugin/
 │       │   └── plugin.json       # plugin manifest (+ bundled mcpServers)
-│       ├── skills/               # 19 workflow skills (see table below)
+│       ├── skills/               # 18 workflow skills (see table below)
 │       │   ├── develop-feature-or-fix/SKILL.md
 │       │   └── ...
 │       ├── agents/               # subagents the skills delegate to
@@ -27,10 +27,12 @@ in its own subfolder under `plugins/`:
 │       │   ├── jira-reader.md       #  reads a ticket → structured fields
 │       │   ├── figma-reader.md      #  reads one Figma frame → build spec
 │       │   └── theme-explorer.md    #  scouts the theme → impact map
-│       ├── hooks/                # conventions injected at session/subagent start
+│       ├── hooks/                # injected conventions + git guards + context monitor
 │       │   ├── comment-discipline.md
 │       │   ├── lean-code.md      #  "lazy senior dev" ladder (FND_LEAN=0 to disable)
-│       │   └── subagent-conventions.sh  # injects the above into code-writing subagents
+│       │   ├── subagent-conventions.sh  # injects the above into code-writing subagents
+│       │   ├── no-verify-bypass.sh      # PreToolUse guard: no hook-bypassing commits
+│       │   └── ...               # see "Hooks" below for the full set
 │       ├── scripts/              # bundled runners the skills call
 │       │   ├── shopify-admin-gql.sh #  Admin GraphQL (store execute → token)
 │       │   ├── theme-json.sh        #  theme JSON / customizer state
@@ -68,11 +70,10 @@ To add another plugin later: create `plugins/<name>/` (with its own
 | `pre-commit-review`               | `/fnd:pre-commit-review` |
 | `commit`                          | `/fnd:commit` |
 | `preflight-checks`                | `/fnd:preflight-checks` |
+| `save-task-context`               | `/fnd:save-task-context` |
 | `fix-accessibility-issue`         | `/fnd:fix-accessibility-issue` |
 | `get-breaking-changes`            | `/fnd:get-breaking-changes` |
 | `fix-breaking-changes`            | `/fnd:fix-breaking-changes` |
-| `generate-multi-brand-css`        | `/fnd:generate-multi-brand-css` |
-| `validate-brand-config-and-tokens`| `/fnd:validate-brand-config-and-tokens` |
 | `update-translations`             | `/fnd:update-translations` |
 | `update-schema-translations`      | `/fnd:update-schema-translations` |
 | `report-plugin-issue`             | `/fnd:report-plugin-issue` |
@@ -105,7 +106,7 @@ predeclare it in managed settings under `extraKnownMarketplaces`.
 ### Local development (from this folder on disk)
 
 ```text
-/plugin marketplace add /Users/oleksandrkever/projects/foundation-claude-plagin
+/plugin marketplace add /path/to/claude-plagins
 /plugin install fnd@domaine
 /reload-plugins
 ```
@@ -190,7 +191,8 @@ A plugin ships agents as `agents/<name>.md`:
 ---
 name: change-reviewer
 description: Reviews the branch's changed files (Liquid / TS / CSS) against Foundation conventions. Invoke before a commit or PR to catch core-file violations, stale comments, and schema mistakes.
-model: sonnet
+model: opus
+effort: medium
 tools: Read, Grep, Glob, Bash
 ---
 
@@ -342,6 +344,27 @@ inspects real store state whenever that answers a question — research and debu
 not just AC verification. Details: `plugins/fnd/references/metafield-metaobject-setup.md` and
 `plugins/fnd/references/theme-customizer-state.md`.
 
+## Hooks
+
+The plugin wires four hook events (`plugin.json` → `hooks`); every hook fails open — a
+hook error never blocks work:
+
+- **SessionStart** — injects the Foundation session conventions from `hooks/*.md`
+  (comment discipline, lean code, live-store access, the task-workspace convention,
+  report-plugin-defects-upstream).
+- **SubagentStart** — `subagent-conventions.sh` re-injects comment discipline + lean code
+  into code-writing subagents; read-only readers are skipped.
+- **PreToolUse (Bash) — two deterministic git guards.** `no-verify-bypass.sh` blocks
+  hook-bypassing commits (`--no-verify` / `-n` in any form, plus `core.hooksPath` /
+  `GIT_CONFIG_*` redirects; its FP/FN contract lives in
+  `tests/no-verify-bypass-matrix.sh`). `no-ai-attribution.sh` blocks AI-attribution
+  trailers in commit messages.
+- **UserPromptSubmit** — `context-stats.cjs` monitors context-window usage and warns
+  (recommending `/compact`) past a threshold. Knobs, set like `FND_LEAN` in
+  `settings.json` → `env`: `FND_CTX_MONITOR=0` turns it off, `FND_CTX_WARN` sets the
+  warn threshold in % (default 40), `FND_CTX_WINDOW` overrides the assumed window size
+  (e.g. for 1M-token sessions).
+
 ## Lean-code convention
 
 A session-start hook injects `hooks/lean-code.md` — a "lazy senior developer" discipline
@@ -359,11 +382,14 @@ durably with `FND_LEAN=0` (project or global `settings.json` → `env`), or say
 
 Two deliberate decisions, recorded so they don't read as omissions:
 
-- **The big workflow skills ship without `allowed-tools`.** `develop-feature-or-fix`,
-  `qa-feature-or-fix`, `write-steps-to-test`, and `pre-commit-review` orchestrate open-ended
-  work (editing, browser MCPs, subagents), so they run under the session's normal permission
-  flow instead of a frozen allowlist. The narrow utility skills (translations,
-  breaking-changes, preview themes, TA write-back) do declare tight allowlists.
+- **The big workflow skills ship without `allowed-tools`.** `write-technical-approach`,
+  `develop-feature-or-fix`, `qa-feature-or-fix`, `write-steps-to-test`, `pre-commit-review`,
+  and `create-pull-request` orchestrate open-ended
+  work (editing, store runners, browser MCPs, subagents), so they run under the session's
+  normal permission
+  flow instead of a frozen allowlist — a frozen list that misses one instructed tool blocks
+  the skill's own workflow. The narrow utility skills (translations,
+  breaking-changes, preview themes, commit, a11y fixes) do declare tight allowlists.
 - **The reader agents ship without a `tools:` restriction.** `jira-reader` / `figma-reader`
   must work whether the Atlassian/Figma MCP comes from this plugin or from the user's own
   config (the MCP tool names differ per install scope), so they inherit the full toolset and

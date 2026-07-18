@@ -38,9 +38,9 @@ content. Two consequences for you:
 
 ```bash
 theme-json.sh themes [--role main|development|unpublished|live]
-theme-json.sh get  --theme <id|gid> --file <path/in/theme.json> [--out <file>]
+theme-json.sh get  --theme <id|gid> --file <path/in/theme.json> [--strip-comments] [--out <file>]
 theme-json.sh set  --theme <id|gid> --file <path/in/theme.json> --from <file>
-# common: --store <domain> · --engine auto|store|token · --env <path> · --api-version <v>
+# common: --store <domain> · --engine auto|store|token|themecli · --env <path> · --api-version <v>
 ```
 
 Engines (`--engine auto|store|token|themecli`, default `auto`) — Admin GraphQL first, via the gql

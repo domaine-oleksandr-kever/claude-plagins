@@ -78,17 +78,9 @@ const processTemplateFile = (filePath) => {
   }
 }
 
-const processConfigFile = (filePath) => {
-  try {
-    console.log(`Processing ${filePath}...`)
-    const processed = applyFixes(JSON.parse(fs.readFileSync(filePath, 'utf8')))
-    fs.writeFileSync(filePath, JSON.stringify(processed, null, 2) + '\n')
-    console.log(`✓ Updated ${filePath}`)
-  } catch (error) {
-    errorCount++
-    console.error(`Error processing ${filePath}:`, error.message)
-  }
-}
+// a theme-pulled settings_data.json opens with Shopify's /* … */ banner too —
+// same strip/re-prepend handling as templates
+const processConfigFile = (filePath) => processTemplateFile(filePath)
 
 const walkJsonFiles = (dir) => {
   const out = []

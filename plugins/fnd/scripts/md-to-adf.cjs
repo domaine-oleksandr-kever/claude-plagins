@@ -63,12 +63,14 @@ function textNode(text, marks) {
 function inlineNodes(input) {
   const out = [];
   const push = (s) => { const n = textNode(s); if (n) out.push(n); };
+  // *-emphasis requires non-space flanks (`\S…\S`) so formulas and globs in prose
+  // (`a * b`, `SELECT *`, `2 ** 3`) never turn into stray marks with eaten asterisks
   const patterns = [
     { kind: 'code',     re: /`([^`]+)`/ },
     { kind: 'link',     re: /\[([^\]]+)\]\(([^)\s]+)\)/ },
-    { kind: 'strongem', re: /\*\*\*([^*]+)\*\*\*/ },
-    { kind: 'strong',   re: /\*\*([^*]+)\*\*/ },
-    { kind: 'em',       re: /\*([^*]+)\*/ },
+    { kind: 'strongem', re: /\*\*\*([^\s*](?:[^*]*[^\s*])?)\*\*\*/ },
+    { kind: 'strong',   re: /\*\*([^\s*](?:[^*]*[^\s*])?)\*\*/ },
+    { kind: 'em',       re: /\*([^\s*](?:[^*]*[^\s*])?)\*/ },
     { kind: 'strike',   re: /~~([^~]+)~~/ },
   ];
   let rest = input;
@@ -115,10 +117,12 @@ function toADF(md) {
     const line = lines[i];
     if (/^\s*$/.test(line)) { i++; continue; }
 
-    // fenced code block
-    const fence = /^```(\w+)?\s*$/.exec(line);
+    // fenced code block — any info string opens a fence (```c++, ```shell session, …);
+    // the language is its first word
+    const fence = /^```(.*)$/.exec(line);
     if (fence) {
-      const lang = fence[1] || null;
+      const info = fence[1].trim();
+      const lang = info ? info.split(/\s+/)[0] : null;
       const buf = [];
       i++;
       while (i < lines.length && !/^```\s*$/.test(lines[i])) { buf.push(lines[i]); i++; }
@@ -190,20 +194,40 @@ function toADF(md) {
       continue;
     }
 
-    // lists (single level)
-    const ordered = /^\s*\d+\.\s+/.test(line);
-    if (ordered || /^\s*([-*+])\s+/.test(line)) {
-      const itemRe = ordered ? /^\s*\d+\.\s+(.*)$/ : /^\s*[-*+]\s+(.*)$/;
-      const start = ordered ? parseInt(/^\s*(\d+)\./.exec(line)[1], 10) : 1;
-      const items = [];
-      while (i < lines.length && itemRe.test(lines[i])) {
-        const m = itemRe.exec(lines[i]);
-        items.push({ type: 'listItem', content: [para(inlineNodes(m[1].trim()))] });
+    // lists — nested by indentation: an item indented 2+ spaces past its parent item
+    // nests inside that parent's listItem (ADF supports it); shallower indents pop back
+    const LIST_RE = /^(\s*)([-*+]|\d+\.)\s+(.*)$/;
+    if (LIST_RE.test(line)) {
+      const stack = []; // { indent, list, lastItem, ordered }
+      while (i < lines.length) {
+        const m = LIST_RE.exec(lines[i]);
+        if (!m) break;
+        const indent = m[1].replace(/\t/g, '  ').length;
+        const ordered = /^\d/.test(m[2]);
+        const item = { type: 'listItem', content: [para(inlineNodes(m[3].trim()))] };
+        while (stack.length && indent < stack[stack.length - 1].indent) stack.pop();
+        let top = stack[stack.length - 1];
+        if (top && ordered === top.ordered && indent < top.indent + 2) {
+          top.list.content.push(item); // sibling item
+          top.lastItem = item;
+        } else {
+          const list = { type: ordered ? 'orderedList' : 'bulletList', content: [item] };
+          if (ordered) {
+            const start = parseInt(m[2], 10);
+            if (start !== 1) list.attrs = { order: start }; // preserve lists starting at e.g. "3."
+          }
+          if (top && indent >= top.indent + 2) {
+            top.lastItem.content.push(list); // nested under the previous item
+          } else {
+            // same level but the marker type changed → sibling list of the other type
+            if (top) { stack.pop(); top = stack[stack.length - 1]; }
+            if (top) top.lastItem.content.push(list);
+            else content.push(list);
+          }
+          stack.push({ indent, list, lastItem: item, ordered });
+        }
         i++;
       }
-      const list = { type: ordered ? 'orderedList' : 'bulletList', content: items };
-      if (ordered && start !== 1) list.attrs = { order: start }; // preserve lists starting at e.g. "3."
-      content.push(list);
       continue;
     }
 

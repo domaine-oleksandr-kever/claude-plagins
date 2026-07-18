@@ -31,7 +31,7 @@ Operating mode: **Phase 1 in plan mode** (validation); Phase 2 consolidates the 
 
 ## Phase 1 — Environment validation `[plan mode]`
 
-Run the full checklist in `${CLAUDE_PLUGIN_ROOT}/references/preflight-checklist.md` (read it now — it owns the per-check items, commands, and remediation): **MCP servers → CLI tools → project skills & rules → local dev server**. Two skill-side specifics: first confirm the active **workspace/IDE** matches the target project and remind the developer to verify IDE/MCP security settings against team policy; and if the dev server isn't running, note that the develop/QA workflows need it for in-browser validation.
+Run the full checklist in `${CLAUDE_PLUGIN_ROOT}/references/preflight-checklist.md` (read it now — it owns the per-check items, commands, and remediation): **CLI tools → MCP servers → project skills & rules → local dev server**. Two skill-side specifics: first confirm the active **workspace/IDE** matches the target project and remind the developer to verify IDE/MCP security settings against team policy; and if the dev server isn't running, note that the develop/QA workflows need it for in-browser validation.
 
 ---
 

@@ -1,7 +1,8 @@
 # Reading linked docs — Notion & other external links
 
 Shared reference for every workflow that ingests a Jira ticket (`/write-technical-approach`,
-`/develop-feature-or-fix`, `/qa-feature-or-fix`, `/write-steps-to-test`). A ticket is rarely
+`/develop-feature-or-fix`, `/qa-feature-or-fix`, `/write-steps-to-test`,
+`/create-pull-request`). A ticket is rarely
 self-contained: it links out to **Notion** data-mapping / spec docs, **Figma** frames,
 **Confluence** pages, Google docs, etc. Those links carry real scope (data models, copy, field
 lists, edge cases). **Skipping them means planning against an incomplete picture.** So: read the

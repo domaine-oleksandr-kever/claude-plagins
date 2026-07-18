@@ -9,7 +9,7 @@ argument-hint: "<component-name | GitHub issue #>"
 arguments:
   - name: target
     description: The component to fix (e.g. mega-menu, cart-drawer) or a GitHub accessibility issue number.
-allowed-tools: Read, Glob, Grep, Edit, Bash(npx playwright test*)
+allowed-tools: Read, Glob, Grep, Edit, Write, Bash(npx playwright test*), Bash(git status*), Bash(git diff*), Bash(git checkout*), Bash(git add*), Bash(git commit*), Bash(git log*)
 ---
 
 # Fix Accessibility Issue

@@ -21,7 +21,6 @@ arguments:
     description: Shopify admin theme URL / THEME_ADMIN_URL. OPTIONAL — part of the manual triplet. Provided → no auto-creation; auto-filled when the skill creates the preview theme itself.
   - name: preview_path
     description: Storefront path the change should be reviewed on (e.g. /products/group-lipglass). Used to deep-link the Preview + Admin (template) rows. Infer from context; ask if unsure.
-allowed-tools: Read, Glob, Grep, Bash(git status), Bash(git fetch*), Bash(git log*), Bash(git diff*), Bash(git remote*), Bash(gh pr create*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/create-preview-theme.sh*)
 ---
 
 # Create PR (GitHub + Jira)

@@ -31,6 +31,9 @@ fabricate a green check**:
 - **Figma MCP** — design extraction (Dev Mode bridge running).
 - **Chrome DevTools MCP** — attaches to a running browser for in-browser validation.
 - **Atlassian MCP** — Jira (and Confluence) auth; optionally verify read access with a known ticket key.
+- **Notion MCP** — linked-doc ingestion (`reading-linked-docs.md`); the TA / develop / QA /
+  steps-to-test workflows **stop** when a ticket links Notion docs and this MCP is missing —
+  verify it responds with any lightweight read.
 - **Shopify Dev MCP** — smoke-test with `learn_shopify_api` (`api: "liquid"`).
 
 On failure, report the **specific** error + remediation (auth, MCP config, server disabled).

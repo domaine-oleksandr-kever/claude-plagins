@@ -76,4 +76,5 @@ A single findings table:
   your job.
 
 Do not apply anything — the caller triages your findings, and every one must be
-explicitly dispositioned (fixed / justified / escalated), never silently dropped.
+explicitly dispositioned (fixed / justified / waived — ESCALATE in auto flows), never
+silently dropped.

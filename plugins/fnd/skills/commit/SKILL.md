@@ -1,7 +1,7 @@
 ---
 name: commit
 description: Create git commits using the Conventional Commits specification. Use when the user asks to commit changes, write a commit message, or run git commit, or invokes /commit.
-allowed-tools: Bash(git status*), Bash(git diff*), Bash(git add*), Bash(git commit*), Bash(git log*), Bash(git ls-files*), Read, Glob, Grep
+allowed-tools: Bash(git status*), Bash(git diff*), Bash(git add*), Bash(git commit*), Bash(git log*), Bash(git ls-files*), Read, Glob, Grep, Edit
 ---
 
 # Commit
@@ -53,4 +53,4 @@ does **not** run the hygiene review itself — it only ensures one happened:
 
 ## Next in the series
 
-When the commit belongs to a ticket with a task workspace, tick `commit` in its `progress.md`, then offer the next unchecked step in one line — normally `/fnd:create-pull-request <ticket>` when the branch has no open PR — **offer only; never auto-run**.
+When the commit belongs to a ticket with a task workspace, tick `commit` in its `progress.md`, then offer the next unchecked step in one line — normally `/fnd:write-steps-to-test <ticket>` (or `/fnd:create-pull-request <ticket>` when steps-to-test is already ticked or not applicable and the branch has no open PR) — **offer only; never auto-run**.

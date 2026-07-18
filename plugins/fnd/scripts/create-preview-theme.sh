@@ -246,7 +246,7 @@ case "$MODE" in
       REUSED=true
     else
       if ! OUT="$(shopify theme push --store "$STORE" --unpublished --theme "$NAME" --path "$TMP_CODE" "${IGN[@]}" ${EXTRA_IGN[@]+"${EXTRA_IGN[@]}"} --json 2>"$ERR")"; then
-        grep -qiE 'limit|maximum|too many' "$ERR" \
+        grep -qiE 'theme limit|maximum number of themes|too many themes' "$ERR" \
           && { rm -f "$ERR"; fail "theme_limit — store is at its theme cap (20 non-Plus / 100 Plus). Delete an old theme or re-run with --reuse."; }
         push_fail push_code_failed
       fi

@@ -73,7 +73,13 @@ function renderText(node) {
   let t = node.text != null ? node.text : '';
   const marks = node.marks || [];
   const has = (m) => marks.some((x) => x.type === m);
-  if (has('code')) return '`' + t + '`'; // code span can't carry other markdown
+  if (has('code')) {
+    // em/strong/strike can't render inside a code span, but a link can still wrap it
+    let c = '`' + t + '`';
+    const clink = marks.find((m) => m.type === 'link');
+    if (clink && clink.attrs && clink.attrs.href) c = '[' + c + '](' + clink.attrs.href + ')';
+    return c;
+  }
   if (has('strike')) t = '~~' + t + '~~';
   if (has('em')) t = '*' + t + '*';
   if (has('strong')) t = '**' + t + '**';
@@ -101,14 +107,27 @@ function inline(nodes) {
       const u = cardUrl(n);
       return u ? '<' + u + '>' : '';
     }
+    if (n.type === 'status') return '[' + ((n.attrs && n.attrs.text) || '') + ']';
+    if (n.type === 'date') {
+      const ts = n.attrs && Number(n.attrs.timestamp);
+      return ts ? new Date(ts).toISOString().slice(0, 10) : '';
+    }
     if (n.content) return inline(n.content); // unknown inline wrapper
-    return '';
+    return (n.attrs && (n.attrs.text || n.attrs.shortName)) || '';
   }).join('');
 }
 
-function listItemText(item) {
-  // a listItem holds block nodes (usually one paragraph); join their rendered text
-  return (item.content || []).map((b) => renderBlock(b)).join(' ').trim();
+// a listItem usually holds one paragraph, but Jira nests child lists as sibling blocks —
+// those must come out as their own indented lines, never space-joined into the parent item
+function renderListItem(item, depth, marker) {
+  const pad = '  '.repeat(depth);
+  const inlineParts = [];
+  const childLines = [];
+  for (const b of item.content || []) {
+    if (b && (b.type === 'bulletList' || b.type === 'orderedList')) childLines.push(renderBlock(b, depth + 1));
+    else inlineParts.push(renderBlock(b, depth));
+  }
+  return [pad + marker + inlineParts.join(' ').trim(), ...childLines].join('\n');
 }
 
 function renderBlock(node, depth) {
@@ -123,10 +142,10 @@ function renderBlock(node, depth) {
     case 'paragraph':
       return inline(node.content);
     case 'bulletList':
-      return (node.content || []).map((li) => '- ' + listItemText(li)).join('\n');
+      return (node.content || []).map((li) => renderListItem(li, depth, '- ')).join('\n');
     case 'orderedList': {
       let i = (node.attrs && node.attrs.order) || 1;
-      return (node.content || []).map((li) => (i++) + '. ' + listItemText(li)).join('\n');
+      return (node.content || []).map((li) => renderListItem(li, depth, (i++) + '. ')).join('\n');
     }
     case 'codeBlock': {
       const lang = (node.attrs && node.attrs.language) || '';
@@ -140,9 +159,12 @@ function renderBlock(node, depth) {
     case 'table': {
       const rows = node.content || [];
       if (!rows.length) return '';
-      // render EVERY block of a cell (a Jira cell can hold several paragraphs / a list)
+      // render EVERY block of a cell (a Jira cell can hold several paragraphs / a list);
+      // depth 0 — cells flatten to one line anyway, indentation would only add noise.
+      // Escape | so a cell's own pipes can't shift the column layout.
       const cellsOf = (row) => (row.content || []).map((c) =>
-        (c.content || []).map((b) => renderBlock(b, depth + 1)).join(' ').replace(/\n/g, ' ').trim());
+        (c.content || []).map((b) => renderBlock(b, 0)).join(' ')
+          .replace(/\n/g, ' ').replace(/\|/g, '\\|').trim());
       const out = [];
       const head = cellsOf(rows[0]);
       out.push('| ' + head.join(' | ') + ' |');

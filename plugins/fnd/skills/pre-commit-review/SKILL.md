@@ -45,16 +45,20 @@ enough surrounding code to judge comments).
 - **B and D run inline here** — they're mechanical (`git diff | grep`, `git status`), no
   agent needed.
 - **A and C are delegated to the `change-reviewer` agent** (`hygiene` emphasis) so the
-  heavy file-reading stays out of the main context. Small diff → one agent; large diff
-  (≳ 15 files) → one `change-reviewer` per file-group, **in parallel**. Pass each agent its
-  file group, the `base`, and the raw B-hits to confirm. Merge its findings table with the
-  inline B/D hits into the step-3 plan.
+  heavy file-reading stays out of the main context. Small vs large diff and the
+  file-group split follow `review-flow.md` §2. Pass each agent its file group, the
+  `base`, and the raw B/D hits — **confirming hits is the agent's job** (it reads those
+  files anyway); inline you only gather candidates. The agent may also return **E rows**
+  (project-rules conformance — `protected-core` is always a blocker); they join the
+  step-3 plan like every other finding.
 - **F is delegated to the `bug-hunter` agent, spawned in parallel with the
   change-reviewer(s)** when the review-flow correctness gate holds (the diff touches
   JS/TS logic, Liquid control flow, or request handling — pure copy/CSS/locale diffs
   skip it, say so in one line). Pass it the `base` and the documented `ceiling:` entries
   from the workspace `notes.md` when a workspace exists. Its findings join the step-3
-  plan as check-F rows, failure scenario included.
+  plan as check-F rows, failure scenario included — the agent reports findings, not
+  fixes: derive each row's **Proposed change** from the failure scenario yourself and
+  carry the finding's Severity/Verdict into the row.
 
 The five checks (A, C, and F full definitions live in the agents — their single home):
 
@@ -65,11 +69,12 @@ The five checks (A, C, and F full definitions live in the agents — their singl
   Propose removing the reference while keeping any useful context (reword to say what the code
   does or why — don't just delete the sentence). First-pass signal:
   ```bash
-  git diff "$mb" | grep -nE '^\+' \
-    | grep -nE '\b[A-Z]{2,}-[0-9]+\b|\((AC|TA)[^)]*\)|\b(AC|TA) [0-9]+[a-z]?\b|Acceptance Criteria|Technical Approach|Steps to Test'
+  git diff "$mb" | grep -nE '^\+[^+]' \
+    | grep -E '\b[A-Z]{2,}-[0-9]+\b|\((AC|TA)[^)]*\)|\b(AC|TA) [0-9]+[a-z]?\b|Acceptance Criteria|Technical Approach|Steps to Test'
   ```
-  Raw hits go to the agent, which confirms each is inside a **comment** and applies the
-  false-positive whitelist (Figma ids, SKUs, `UTF-8`-style acronyms, real schema labels).
+  (`^\+[^+]` keeps `+++ b/<path>` diff headers out of the candidates.) Raw hits go to
+  the agent, which confirms each is inside a **comment** and applies the false-positive
+  whitelist — its single home is the `change-reviewer` definition.
 - **C — Refactor / improvement (required)** — run by the agent: duplication, dead code, unclear
   names, small correctness/readability wins — **in the changed code only**, every change gets a pass.
 - **D — Untracked referenced files.** Verify every file the changed code references —
@@ -78,7 +83,8 @@ The five checks (A, C, and F full definitions live in the agents — their singl
   ```bash
   git status --porcelain | grep '^??'
   ```
-  then cross-check each untracked path against references in the diff. A referenced-but-untracked
+  the candidates go to the `change-reviewer` with the B hits — it confirms which untracked
+  paths the diff actually references. A referenced-but-untracked
   file breaks the theme on deploy — propose `git add <path>` for each one found.
 - **F — Correctness (bug hunt)** — run by the `bug-hunter` agent: real bugs in how the
   diff interacts with unchanged code (races, merchant-invariant bypasses, state
@@ -87,7 +93,8 @@ The five checks (A, C, and F full definitions live in the agents — their singl
 
 ## 3. Present the plan
 
-Print a single review plan grouped by file. **All five checks (A, B, C, D, F) go in the plan** — each
+Print a single review plan grouped by file. **Every check's rows go in the plan — A, B, C,
+D, F, plus any E rows the agent returned** — each
 row is a concrete proposed change with a one-line rationale. Number the rows sequentially in a
 first `#` column so the developer can reference findings by number:
 

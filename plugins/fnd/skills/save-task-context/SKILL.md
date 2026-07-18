@@ -28,15 +28,17 @@ already known; missing data is reported as a gap, not fetched.
    then create `.claude/fnd/<work-id>/` if absent. Merge into existing files — don't blow away
    earlier entries.
 3. **Write what the conversation holds** (verbatim, per the reference):
-   - ticket fields you actually have → `ticket.md` / `ticket-<KEY>.md` (stamp `fetched_at`; a
-     field you never saw stays absent and is listed as a gap);
+   - ticket fields you actually have → `ticket.md` / `ticket-<KEY>.md` (stamp `fetched_at`, and
+     record `jira_updated` when the ticket's updated timestamp appeared in the conversation —
+     without it every later freshness check degrades to a full re-read; if it never appeared,
+     note that gap in the file; a field you never saw stays absent and is listed as a gap);
    - Figma build specs → `figma-<node-id>.md`;
    - an approved plan / QA checklist + report / Steps to Test produced this session →
      `plan.md` / `qa.md` / `steps-to-test.md`;
    - decisions, gotchas, and — per bug — root cause, fix summary, how it was verified → dated
      entries in `notes.md`;
    - where the work stands → `progress.md` (series rows for a single ticket; ticket rows plus
-     the shared `pre-commit-review → commit → create-pull-request → write-steps-to-test` tail
+     the shared `pre-commit-review → commit → write-steps-to-test → create-pull-request` tail
      for a batch).
 4. **Report** — one compact list: files written, one line on what each holds, and the known
    gaps (e.g. "ELC-302 AC never fetched"). Offer — don't run — a `jira-reader` fetch for gaps

@@ -21,7 +21,7 @@ fi
 # frequent spawns). An unknown or unparsable type gets the conventions:
 # over-injecting is cheap, a code-writing agent without them is not.
 case "$agent_type" in
-  *jira-reader*|*figma-reader*|*theme-explorer*|*change-reviewer*|*bug-hunter*|Explore|claude-code-guide|statusline-setup)
+  *jira-reader*|*figma-reader*|*theme-explorer*|*change-reviewer*|*bug-hunter*|Explore|Plan|claude-code-guide|statusline-setup)
     exit 0 ;;
 esac
 

@@ -12,14 +12,15 @@
 //                   spawns node)
 //   FND_CTX_WINDOW  context window in tokens (default: resolved from the session model,
 //                   200000 when the model is unknown)
-//   FND_CTX_WARN    warn-from percentage (default 40)
+//   FND_CTX_WARN    warn-from percentage (default 40; 0 = warn on every prompt)
 'use strict';
 
 const fs = require('fs');
 
 const TAIL_BYTES = 512 * 1024;
 const ENV_WINDOW = parseInt(process.env.FND_CTX_WINDOW || '', 10) || 0;
-const WARN_AT = parseInt(process.env.FND_CTX_WARN || '', 10) || 40;
+const ENV_WARN = parseInt(process.env.FND_CTX_WARN || '', 10);
+const WARN_AT = Number.isNaN(ENV_WARN) ? 40 : ENV_WARN;
 
 // 1M-window families: Fable/Mythos, Opus ≥4.6, Sonnet ≥4.6. Haiku and anything
 // unrecognized keep the conservative 200k default.
@@ -56,10 +57,12 @@ process.stdin.on('end', () => {
         const entry = JSON.parse(lines[i]);
         const u = entry.message && entry.message.usage;
         if (u && u.input_tokens != null && !entry.isSidechain) {
-          if (!usage) usage = u;
           const m = entry.message.model;
-          // Skip placeholders like "<synthetic>" — keep scanning for a real model ID.
-          if (m && m[0] !== '<') {
+          // Synthetic (API-error) entries like "<synthetic>" carry zeroed usage —
+          // skip them outright, or the monitor reads 0% right after an API error.
+          if (m && m[0] === '<') continue;
+          if (!usage) usage = u;
+          if (m) {
             model = m;
             break;
           }
@@ -89,6 +92,12 @@ process.stdin.on('end', () => {
     ]
       .filter(Boolean)
       .join(' · ');
+
+    // pct past 100 means the window guess is wrong (e.g. a 1M-beta session on a
+    // model id the family table maps to 200k) — surface the override knob.
+    if (pct >= 100 && !ENV_WINDOW) {
+      msg += ' — over 100%? a bigger window is active: set FND_CTX_WINDOW=<tokens> to fix this readout';
+    }
 
     // systemMessage is user-facing only; additionalContext (warn-level and up) lets
     // skills condition on "the context monitor flagged this session" without the

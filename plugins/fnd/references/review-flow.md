@@ -53,6 +53,7 @@ if [ -f "$marker" ] && grep -qx "branch=$branch" "$marker"; then
   reviewed_before=yes
   prev_hash=$(sed -n 's/^diff_hash=//p' "$marker")
   prev_head=$(sed -n 's/^reviewed_at_head=//p' "$marker")
+  prev_correctness=$(sed -n 's/^correctness_hash=//p' "$marker")   # empty → check F never satisfied
 else
   reviewed_before=no   # no marker, or marker is for a different branch → first time here
 fi
@@ -80,8 +81,8 @@ The cost is **reading the changed files**, which checks A and C (and E) share. S
   (`(AC 1a)`, `(TA 1a)`, "Acceptance Criteria", "Technical Approach", "Steps to Test"):
 
   ```bash
-  git diff "$(git merge-base "$base" HEAD)" | grep -nE '^\+' \
-    | grep -nE '\b[A-Z]{2,}-[0-9]+\b|\((AC|TA)[^)]*\)|\b(AC|TA) [0-9]+[a-z]?\b|Acceptance Criteria|Technical Approach|Steps to Test'   # B candidates (incl. staged + unstaged)
+  git diff "$(git merge-base "$base" HEAD)" | grep -nE '^\+[^+]' \
+    | grep -E '\b[A-Z]{2,}-[0-9]+\b|\((AC|TA)[^)]*\)|\b(AC|TA) [0-9]+[a-z]?\b|Acceptance Criteria|Technical Approach|Steps to Test'   # B candidates (incl. staged + unstaged; ^\+[^+] skips +++ headers)
   git status --porcelain | grep '^??'                                          # D candidates
   ```
 
@@ -134,6 +135,10 @@ correctness finding stops a PR the same way a `protected-core` blocker does.
 reviewed_before == no   → run the FULL flow (§2), then write the marker (§1).
 reviewed_before == yes  → ASK the developer; do not auto-skip and do not auto-rerun.
 ```
+
+> **Pipeline exception:** inside a `/fnd:ship` run the autonomy rule forbids the ask —
+> the finalize brief replaces it deterministically: `diff_hash` unchanged → skip (say
+> so); changed or marker absent → full re-review. A phase agent never asks.
 
 When asking (subsequent runs), enrich the prompt so the decision is easy:
 

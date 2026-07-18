@@ -66,7 +66,9 @@ isolation**. To redeploy code into an existing preview theme without touching it
    (`…/editor?previewPath=<url-encoded path>`).
    - On **`error=settings_drift`** the dev theme is **ahead of this branch** — Shopify won't accept
      its settings onto a preview built from this branch's code. The script reports the real `cause=`
-     and deletes the code-only theme it just made. **Don't retry** — tell the developer to
+     and — only when it created the theme this run — deletes the code-only copy (a failed cleanup
+     surfaces as `created_theme_deleted=failed`; a reused pre-existing theme is never deleted).
+     **Don't retry** — tell the developer to
      **duplicate the dev theme manually in the admin** and rename it to the `[ELC-…]` name
      (click-path and why a server-side copy works:
      `${CLAUDE_PLUGIN_ROOT}/skills/create-pull-request/REFERENCE.md → Preview theme`); the preview

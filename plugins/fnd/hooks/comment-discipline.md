@@ -15,7 +15,7 @@ A doc block is the caller's contract — but don't pad it: skip doc that merely 
 ### Inline comments inside code — minimize
 
 - **Comment WHY, not WHAT** — only when intent isn't obvious from the code. Prefer a clearer name over a comment.
-- **Don't narrate your own change** — no `// added X`, `// fixed Y`, no ticket numbers in comments; that belongs in the commit/PR.
+- **Don't narrate your own change** — no `// added X`, `// fixed Y`, no ticket numbers or ticket-section pointers (`(AC 1a)`, `(TA 2b)`) in comments; that belongs in the commit/PR.
 - **One line** where possible. No ASCII banners, no section dividers.
 - **Only the non-obvious:** a workaround, gotcha, invariant, "why this and not the obvious alternative", or a spec/link reference.
 - **Match the surrounding file's** comment density and style.

@@ -81,7 +81,9 @@ It tries `store execute` first (CLI ≥ 4.x), falls back to the token, takes the
 JSON response. Both engines return the **same envelope** — `{"data":…}` on success, `{"errors":…}`
 on a GraphQL failure (exit 0, mirroring the Admin API's HTTP 200 + errors) — the runner
 wraps/unboxes `store execute`'s native output so responses read identically either way, and a
-GraphQL error never triggers the token fallback (double-execution risk for mutations). Put each query/mutation in a `.graphql` file **inside the task workspace** — scratch/inspection queries in `.claude/fnd/<work-id>/tmp/`, the Mode 2 living setup file at the workspace root; never the repo's `docs/` (`${CLAUDE_PLUGIN_ROOT}/references/task-workspace.md`) — and pass it with `--query` (and
+GraphQL error never triggers the token fallback — and for a **mutation**, no failure after an
+actually-attempted execute does (the mutation may already be applied server-side; the runner
+exits with `error=store_execute_failed_mutation` — verify store state before re-running). Put each query/mutation in a `.graphql` file **inside the task workspace** — scratch/inspection queries in `.claude/fnd/<work-id>/tmp/`, the Mode 2 living setup file at the workspace root; never the repo's `docs/` (`${CLAUDE_PLUGIN_ROOT}/references/task-workspace.md`) — and pass it with `--query` (and
 `--operation` when the file holds several named operations — for the store engine the runner
 extracts the named operation itself). If it exits with `error=no_admin_token`, **neither** engine
 is set up — its hint line names both fixes (add the token to `.env`, or the one-time

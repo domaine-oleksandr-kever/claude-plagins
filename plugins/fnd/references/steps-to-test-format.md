@@ -24,7 +24,43 @@ their **own** theme/environment.
   heading + an ordered list of steps with expectations. **Avoid wide GFM tables** — they
   make the Jira ADF balloon (each cell becomes a nested node) and that large blob is
   fragile to write back. Reserve tables for genuinely tabular, short data.
-- Use the appropriate template — **General** vs **Bug** — per the ticket type.
+- Use the matching template skeleton below — **General** vs **Bug** — per the ticket type.
+
+## Templates
+
+Pick by ticket type (`ticket_type` / the Jira issue type): **General** for features and
+improvements, **Bug** for defect fixes. Both follow every writing rule above — no document
+title, theme-agnostic navigation, expectations per step.
+
+**General (feature / improvement):**
+
+```markdown
+**Preconditions:** theme/template, markets, customer state, and data setup (products,
+collections, metafields, settings) the tester needs before starting.
+
+### <Scenario heading — one per AC or user-visible flow>
+1. Go to <relative path> (<template> · Online Store → <section/block>).
+2. <Action>. **Expected:** <exact outcome — copy, layout, values, breakpoint>.
+
+### Edge cases
+1. <Boundary / empty / error state>. **Expected:** <behaviour>.
+```
+
+**Bug (defect fix):**
+
+```markdown
+**Preconditions:** <setup needed to hit the original defect — data, settings, viewport>.
+
+### Reproduce the original issue
+1. <The exact steps that used to fail>. **Expected (fixed):** <correct behaviour>.
+   *Before the fix:* <what used to happen — so the tester recognizes a regression>.
+
+### Verify the fix
+1. <AC-driven checks of the corrected behaviour>. **Expected:** <outcome>.
+
+### Regression sweep
+1. <Adjacent flows the fix could disturb>. **Expected:** unchanged behaviour.
+```
 
 ## Quality bar
 

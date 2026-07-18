@@ -24,8 +24,11 @@
 #     Skills must therefore call THIS script and must NOT `Read` the .env file themselves.
 #
 # Selection (--engine auto, the default): shopify CLI present AND major version ≥ 4 → try
-# `store execute`; on missing/expired store auth — or any other execute failure — fall back
-# to the token engine with a note on stderr. `--engine store` / `--engine token` forces one.
+# `store execute`; on PRE-execution failures (CLI missing/old, no stored auth, oversized
+# variables) fall back to the token engine with a note on stderr. After an actually
+# attempted execute, queries still fall back — MUTATIONS never do: the mutation may have
+# been applied server-side before the CLI failed, and re-sending it through the token
+# engine would execute it twice. `--engine store` / `--engine token` forces one.
 #
 # The store domain comes from shopify.theme.toml's FIRST uncommented `store=` line — the same
 # pick as create-preview-theme.sh, which matters when a multi-environment toml lists several —
@@ -34,16 +37,19 @@
 #
 # Usage:
 #   shopify-admin-gql.sh --query <file.graphql> [--operation <name>] [--variables <json>] \
+#                        [--variables-file <file.json>] \
 #                        [--env <path>] [--store <name|domain>] [--api-version <ver>] \
 #                        [--engine auto|store|token]
 #
-#   --query        path to a .graphql file (may hold multiple named operations)
-#   --operation    operationName to run when the file has more than one operation
-#   --variables    JSON string of GraphQL variables (optional)
-#   --env          path to the dotenv file holding the token (default: ./.env; token engine only)
-#   --store        store subdomain or full *.myshopify.com (default: from shopify.theme.toml)
-#   --api-version  Admin API version (default: 2026-04, or $SHOPIFY_ADMIN_API_VERSION)
-#   --engine       auto (default) | store | token
+#   --query          path to a .graphql file (may hold multiple named operations)
+#   --operation      operationName to run when the file has more than one operation
+#   --variables      JSON string of GraphQL variables (optional)
+#   --variables-file file holding the variables JSON — use for large payloads (whole
+#                    theme-file bodies): argv has a per-argument kernel limit
+#   --env            path to the dotenv file holding the token (default: ./.env; token engine only)
+#   --store          store subdomain or full *.myshopify.com (default: from shopify.theme.toml)
+#   --api-version    Admin API version (default: 2026-04, or $SHOPIFY_ADMIN_API_VERSION)
+#   --engine         auto (default) | store | token
 #
 # For the token engine the token is read from $SHOPIFY_ADMIN_TOKEN (already exported), else
 # from the --env file's SHOPIFY_ADMIN_TOKEN= line.
@@ -56,7 +62,7 @@
 # re-running a mutation elsewhere could execute it twice.
 set -euo pipefail
 
-QUERY_FILE=""; OPERATION=""; VARIABLES=""; ENV_FILE=".env"; STORE=""; ENGINE="auto"
+QUERY_FILE=""; OPERATION=""; VARIABLES=""; VARIABLES_FILE=""; ENV_FILE=".env"; STORE=""; ENGINE="auto"
 API_VERSION="${SHOPIFY_ADMIN_API_VERSION:-2026-04}"
 
 # a value flag must not be the last arg — a bare `shift 2` would exit silently under set -e
@@ -67,6 +73,7 @@ while [ $# -gt 0 ]; do
     --query)        need_val $# "$1"; QUERY_FILE="$2"; shift 2 ;;
     --operation)    need_val $# "$1"; OPERATION="$2"; shift 2 ;;
     --variables)    need_val $# "$1"; VARIABLES="$2"; shift 2 ;;
+    --variables-file) need_val $# "$1"; VARIABLES_FILE="$2"; shift 2 ;;
     --env)          need_val $# "$1"; ENV_FILE="$2"; shift 2 ;;
     --store)        need_val $# "$1"; STORE="$2"; shift 2 ;;
     --api-version)  need_val $# "$1"; API_VERSION="$2"; shift 2 ;;
@@ -83,6 +90,14 @@ command -v jq >/dev/null 2>&1 || { echo "error=jq_not_found" >&2; exit 2; }
 if [ -n "$VARIABLES" ] && ! printf '%s' "$VARIABLES" | jq empty >/dev/null 2>&1; then
   echo "error=invalid_variables_json (--variables must be valid JSON)" >&2
   exit 2
+fi
+if [ -n "$VARIABLES_FILE" ]; then
+  [ -z "$VARIABLES" ] || { echo "error=conflicting_flags (--variables and --variables-file are mutually exclusive)" >&2; exit 2; }
+  [ -f "$VARIABLES_FILE" ] || { echo "error=variables_file_not_found file=$VARIABLES_FILE" >&2; exit 2; }
+  jq empty "$VARIABLES_FILE" >/dev/null 2>&1 || { echo "error=invalid_variables_json (--variables-file must hold valid JSON)" >&2; exit 2; }
+  # the CLI engine can only take variables on argv — read them in; the oversize guard
+  # in try_store_execute routes huge payloads to the curl engine (body via file)
+  VARIABLES="$(cat "$VARIABLES_FILE")"
 fi
 
 # --- store domain: --store, else $SHOPIFY_STORE, else uncommented store= in shopify.theme.toml ---
@@ -123,6 +138,12 @@ try_store_execute() {
   major="${ver%%.*}"
   case "$major" in ''|*[!0-9]*) SKIP_REASON="unparseable shopify CLI version '$ver'"; return 1 ;; esac
   [ "$major" -ge 4 ] || { SKIP_REASON="shopify CLI $ver has no \`store execute\` (needs >= 4.x)"; return 1; }
+  # pre-execution guard: the CLI takes variables on argv, which has a per-argument kernel
+  # limit — route oversized payloads to the curl engine (body goes via file there)
+  if [ "${#VARIABLES}" -gt 100000 ]; then
+    SKIP_REASON="variables too large for the CLI argv (${#VARIABLES} bytes)"
+    return 1
+  fi
 
   local qfile="$QUERY_FILE" tmpq=""
   if [ -n "$OPERATION" ]; then
@@ -139,7 +160,8 @@ try_store_execute() {
   local args=(store execute --store "$DOMAIN" --query-file "$qfile" --json --no-color --version "$API_VERSION")
   [ -n "$VARIABLES" ] && args+=(--variables "$VARIABLES")
   # the CLI refuses mutations unless explicitly opted in
-  if grep -qE '^[[:space:]]*mutation([[:space:]]|[({]|$)' "$qfile"; then args+=(--allow-mutations); fi
+  local is_mutation=0
+  if grep -qE '^[[:space:]]*mutation([[:space:]]|[({]|$)' "$qfile"; then is_mutation=1; args+=(--allow-mutations); fi
 
   local out err rc=0
   out="$(mktemp)"; err="$(mktemp)"
@@ -152,7 +174,10 @@ try_store_execute() {
     rm -f "$out" "$err"
     return 0
   fi
+  local safe_fallback=0
   if grep -q 'No stored app authentication found' "$err"; then
+    # the CLI failed before sending anything — nothing executed server-side
+    safe_fallback=1
     SKIP_REASON="no stored store auth for $DOMAIN — one-time manual fix: shopify store auth --store $DOMAIN --scopes <comma-separated-scopes>"
   elif grep -q 'GraphQL operation failed' "$err"; then
     # a definitive GraphQL error, not an availability problem — do NOT fall back to the token
@@ -171,6 +196,14 @@ try_store_execute() {
     SKIP_REASON="store execute failed: $(tr '\n' ' ' < "$err" | sed -E 's/[[:space:]]+/ /g' | cut -c1-300)"
   fi
   rm -f "$out" "$err"
+  # an execute was actually attempted and failed for an unknown reason — for a mutation
+  # that could mean "applied server-side, then the CLI died": re-sending it through the
+  # token engine risks double execution, so never fall back here
+  if [ "$is_mutation" -eq 1 ] && [ "$safe_fallback" -ne 1 ]; then
+    echo "error=store_execute_failed_mutation ($SKIP_REASON)" >&2
+    echo "hint=NOT falling back to the token engine — the mutation may already have been applied. Verify the store state first; re-run only if the change is absent." >&2
+    exit 3
+  fi
   return 1
 }
 
@@ -201,22 +234,50 @@ fi
 
 URL="https://${DOMAIN}/admin/api/${API_VERSION}/graphql.json"
 
-# Build the JSON body safely with jq (handles quoting/newlines in the query).
-BODY="$(jq -n \
-  --arg q "$(cat "$QUERY_FILE")" \
-  --arg op "$OPERATION" \
-  --argjson vars "${VARIABLES:-null}" \
-  '{query: $q}
-   + (if $op  != ""   then {operationName: $op}   else {} end)
-   + (if $vars != null then {variables: $vars}     else {} end)')"
+# Build the JSON body with jq, straight into a file — the query and variables never ride
+# any argv (per-argument kernel limit) and the body goes to curl via @file for the same
+# reason: --rawfile/--slurpfile keep both off the jq command line.
+BODYF="$(mktemp)"; RESPF="$(mktemp)"; HDR_CFG="$(mktemp)"; VARSF_TMP="$(mktemp)"
+trap 'rm -f "$HDR_CFG" "$BODYF" "$RESPF" "$VARSF_TMP"' EXIT
+VARSF=""
+if [ -n "$VARIABLES_FILE" ]; then
+  VARSF="$VARIABLES_FILE"
+elif [ -n "$VARIABLES" ]; then
+  printf '%s' "$VARIABLES" > "$VARSF_TMP"   # printf is a builtin — no argv limit
+  VARSF="$VARSF_TMP"
+fi
+if [ -n "$VARSF" ]; then
+  jq -c -n \
+    --rawfile q "$QUERY_FILE" \
+    --arg op "$OPERATION" \
+    --slurpfile vars "$VARSF" \
+    '{query: $q}
+     + (if $op != "" then {operationName: $op} else {} end)
+     + {variables: $vars[0]}' > "$BODYF"
+else
+  jq -c -n \
+    --rawfile q "$QUERY_FILE" \
+    --arg op "$OPERATION" \
+    '{query: $q}
+     + (if $op != "" then {operationName: $op} else {} end)' > "$BODYF"
+fi
 
 # The token goes into a private curl config file (mktemp = 0600, removed on exit) instead of
 # the argv, so it never shows in `ps` and never reaches stdout/stderr.
-HDR_CFG="$(mktemp)"
-trap 'rm -f "$HDR_CFG"' EXIT
 printf 'header = "X-Shopify-Access-Token: %s"\n' "$TOKEN" > "$HDR_CFG"
 
-curl -sS -X POST "$URL" \
+# Capture the HTTP status: a 401/404/429/5xx body is HTML/JSON garbage, not a GraphQL
+# envelope — it must exit non-zero with error=http_<code>, never reach stdout as data.
+HTTP_CODE="$(curl -sS -X POST "$URL" \
   -K "$HDR_CFG" \
   -H "Content-Type: application/json" \
-  --data "$BODY"
+  --data @"$BODYF" \
+  -o "$RESPF" -w '%{http_code}')" \
+  || { echo "error=curl_transport_failed" >&2; exit 5; }
+case "$HTTP_CODE" in
+  2*) cat "$RESPF" ;;
+  *)
+    echo "error=http_${HTTP_CODE} url=$URL" >&2
+    head -c 600 "$RESPF" | tr '\n' ' ' >&2; echo >&2
+    exit 5 ;;
+esac

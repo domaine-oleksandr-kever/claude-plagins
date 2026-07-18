@@ -1,7 +1,7 @@
 ---
 name: fix-breaking-changes
 description: >
-  Apply Shopify theme breaking-change fixes documented in `breaking-changes.md` to `templates/*.json`
+  Apply Shopify theme breaking-change fixes documented in `breaking-changes.md` to `templates/**/*.json`
   and `config/settings_data.json` via a customizable Node script, then verify with theme check. Use
   when the user asks to fix / apply breaking changes, migrate templates after a major version bump, or
   invokes /fix-breaking-changes. Pairs with get-breaking-changes (which produces the report).
@@ -11,7 +11,7 @@ allowed-tools: Read, Edit, Grep, Glob, Bash(mkdir -p scripts), Bash(cp ${CLAUDE_
 
 # Fix Breaking Changes
 
-Apply the fixes documented in `breaking-changes.md` to `templates/*.json` and `config/settings_data.json`. Prefer the bundled script over hand-editing each file; clean it up afterwards.
+Apply the fixes documented in `breaking-changes.md` to `templates/**/*.json` and `config/settings_data.json`. Prefer the bundled script over hand-editing each file; clean it up afterwards.
 
 **Prerequisite:** `breaking-changes.md` exists in the project root (produce it with `get-breaking-changes`).
 

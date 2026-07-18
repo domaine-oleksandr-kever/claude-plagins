@@ -24,6 +24,11 @@ fields) — the categories are lenses, not a fixed list. Two hard rules:
 - **Derive from the final diff, not the plan.** A checklist approved before implementation
   can't cover interactions that appeared during it — re-derive against the real diff and
   append the missing rows before executing.
+- **Read-only store ≠ reduced mode.** A data-shaped row whose hostile value needs write
+  access the run doesn't have is still derived and still reported — as
+  `not-executable: access`, never silently dropped and never marked "pass". In a pipeline
+  run the access level is settled at the interview (ship Step 2), so these rows are known
+  and marked before the ✋ gate, not discovered mid-run.
 
 ## Executing the rows
 
