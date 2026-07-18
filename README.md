@@ -41,6 +41,11 @@ in its own subfolder under `plugins/`:
 │           ├── jira-custom-fields.md
 │           ├── review-flow.md    #  shared contract for the review/marker flow
 │           └── ...
+├── tests/                        # committed test suites for the hooks + scripts
+│   ├── no-verify-bypass-matrix.sh   #  FP/FN contract of the two commit guards
+│   ├── hooks-sim.sh                 #  SessionStart / monitor-gate / context-stats sims
+│   ├── scripts-sim.sh               #  runner + theme-json + converter-caller sims
+│   └── adf-md-fixtures.mjs          #  ADF ↔ markdown converter fixtures
 ├── LICENSE
 └── README.md
 ```
@@ -291,15 +296,15 @@ end-to-end.
 
 ```mermaid
 flowchart TD
-    A["/fnd:ship &lt;ticket&gt;"] --> B{"Step 0 — preflight<br/>MCP · CLI · dev server ·<br/>permissions · clean context"}
+    A["/fnd:ship &lt;ticket&gt;"] --> B{"Step 0 — preflight<br/>MCP · CLI · dev server · permissions ·<br/>store-access probe · clean context"}
     B -- fail --> B0["stop: fix environment<br/>(nothing half-started)"]
     B -- pass --> C["ingest in parallel<br/>jira-reader · figma-reader · theme-explorer"]
     C --> D["interview (AskUserQuestion)<br/>ticket-specific + policy set"]
-    D --> E["pipeline.md<br/>decisions + escalation contract"]
+    D --> E["pipeline.md (status: draft)<br/>decisions + escalation contract"]
     E --> F{"✋ the only gate<br/>plan + QA checklist"}
-    F -- approved --> G
+    F -- "approved (arms active)" --> G
     subgraph AUTO["autonomous — each phase = fresh-context subagent; conductor keeps decisions + reports only"]
-        G["implement<br/>(plan-driven)"] --> H["qa — execute the fixed<br/>checklist + break-it"]
+        G["implement<br/>(plan-driven)"] --> H["qa — extend + run the checklist<br/>break-it + parallel bug-hunter"]
         H -- "blocking fail · cap 2" --> G
         H -- pass --> I["finalize<br/>review checks → commit"]
         I --> K["create PR<br/>+ preview theme"]
