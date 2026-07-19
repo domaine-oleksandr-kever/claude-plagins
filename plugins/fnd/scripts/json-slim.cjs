@@ -60,6 +60,8 @@ const DEFAULTS = {
   truncate: true, // stage 4: clip base64 / data-URI / very long strings
   stringLimit: 200, // stage 4 threshold (chars)
   toon: false, // optional lossless tabular re-serialization of uniform arrays (behind a flag)
+  trace: false, // instrument `stages` (which stages changed bytes) for the FND_MCP_SLIM_DEBUG feed;
+  //               off ⇒ a single final compact() (pre-M6 cost) — the hot path pays nothing when off
   // preserveFields { keyName: true } leaves the value/subtree under those keys uncrushed. Escape
   // hatch: name an ARRAY's own key to keep it whole — a field inside crushable rows does NOT shield
   // those rows from sampling (row-level preserve is a possible future enhancement).
@@ -574,9 +576,12 @@ const SPILL_PREFIXES = ['fnd-crush-', 'fnd-mcp-slim-', 'fnd-prompt-json-'];
 // no SPILL_PREFIX (it is excluded for good measure anyway).
 const SWEEP_MARKER = '.fnd-mcp-slim-sweep';
 const SWEEP_THROTTLE_MS = 10 * 60 * 1000;
-// Files that share a spill prefix but must survive: a planned debug log + its one rotation, and the
-// marker itself. Excluded by EXACT name, so `fnd-mcp-slim-debug.log` is never mistaken for a spill.
-const SWEEP_KEEP = new Set(['fnd-mcp-slim-debug.log', 'fnd-mcp-slim-debug.log.1', SWEEP_MARKER]);
+// The FND_MCP_SLIM_DEBUG log basename (its writer + rotation live in the debug-log section below);
+// defined here so SWEEP_KEEP is the single source of truth — the sweep must never prune it.
+const DEBUG_LOG = 'fnd-mcp-slim-debug.log';
+// Files that share a spill prefix but must survive: the debug log + its one rotation, and the sweep
+// marker. Excluded by EXACT name, so `fnd-mcp-slim-debug.log` is never mistaken for a spill and swept.
+const SWEEP_KEEP = new Set([DEBUG_LOG, `${DEBUG_LOG}.1`, SWEEP_MARKER]);
 
 // Parse FND_MCP_SLIM_TTL as hours. Default 24; exactly `0` disables the sweep. ANY invalid value —
 // non-numeric, NaN, negative — falls back to 24: a negative TTL must NEVER become a past cutoff
@@ -625,6 +630,38 @@ function sweepSpills(dir) {
     }
   } catch (_) {} // any failure → no-op
   return summary;
+}
+
+// ---------------------------------------------------------------------------- debug log --
+
+// Opt-in observability (FND_MCP_SLIM_DEBUG, off by default): one JSONL metadata line per hook/CLI
+// invocation → <spill-dir>/<DEBUG_LOG>. Metadata ONLY (bytes/decision/reason/stages) — never any
+// payload content. The M5 sweep excludes this file and its rotation by exact name (SWEEP_KEEP, where
+// DEBUG_LOG is defined). Single home: the mcp-slim hook and this module's CLI both call debugLog().
+const DEBUG_LOG_MAX = 5 * 1024 * 1024; // rotate one generation past ~5 MB (bounded, keeps the recent window)
+
+// On only when FND_MCP_SLIM_DEBUG is explicitly enabled (1/true/yes/on). Unset / 0 / false → off,
+// so the default really is zero side effects: debugLog opens nothing and creates no file.
+function debugEnabled() {
+  const raw = process.env.FND_MCP_SLIM_DEBUG;
+  return !!raw && /^(1|true|yes|on)$/i.test(raw.trim());
+}
+
+// Append one JSONL trace line (`ts` stamped here, insertion order preserved after it). Best-effort:
+// disabled → no-op; every error swallowed so logging NEVER touches the hook's emitted result or the
+// CLI's stdout / exit code. Rotates the log to `.log.1` (overwrite) once it passes DEBUG_LOG_MAX.
+// `dir` shares the spill root so the log lives beside the spills it describes.
+function debugLog(record, dir) {
+  try {
+    if (!debugEnabled()) return;
+    const root = spillRoot(dir);
+    try { fs.mkdirSync(root, { recursive: true }); } catch (_) {}
+    const logPath = path.join(root, DEBUG_LOG);
+    try {
+      if (fs.statSync(logPath).size >= DEBUG_LOG_MAX) fs.renameSync(logPath, path.join(root, `${DEBUG_LOG}.1`));
+    } catch (_) {} // no log yet, or rotate failed → just append below
+    fs.appendFileSync(logPath, `${JSON.stringify({ ts: new Date().toISOString(), ...record })}\n`);
+  } catch (_) {}
 }
 
 // ------------------------------------------------------------------------ per-type crush --
@@ -965,39 +1002,54 @@ function toonStage(value, depth) {
   return value;
 }
 
-// slim a JSON *string* through the full pipeline → { output, wasModified, bytesIn, bytesOut, ratio }.
-// Any stage failure → the original passes through untouched (safety rail).
+// slim a JSON *string* through the full pipeline →
+//   { output, wasModified, bytesIn, bytesOut, ratio, stages, reason? }.
+// `stages` names the pipeline stages that actually changed the serialized bytes (adf / noise /
+// truncate / crush / toon) — the FND_MCP_SLIM_DEBUG instrumentation; populated ONLY when
+// `cfg.trace` (off by default), so the compression hot path stays single-serialization. `reason`
+// marks a non-compressing outcome the debug log reports verbatim (`non-json` / `error-shape` /
+// `transform-error`). Any stage failure → the original passes through untouched (safety rail).
 function slim(content, config) {
   const cfg = { ...DEFAULTS, ...(config || {}) };
-  if (typeof content !== 'string') return { output: content, wasModified: false, bytesIn: 0, bytesOut: 0, ratio: 0 };
+  if (typeof content !== 'string') return { output: content, wasModified: false, bytesIn: 0, bytesOut: 0, ratio: 0, stages: [] };
   const bytesIn = Buffer.byteLength(content, 'utf8');
   let parsed;
   try { parsed = JSON.parse(content); } catch (_) {
-    return { output: content, wasModified: false, bytesIn, bytesOut: bytesIn, ratio: 0 };
+    return { output: content, wasModified: false, bytesIn, bytesOut: bytesIn, ratio: 0, reason: 'non-json', stages: [] };
   }
   // Never touch error envelopes — write-gating elsewhere depends on seeing them verbatim.
   if (isErrorShape(parsed)) {
-    return { output: content, wasModified: false, bytesIn, bytesOut: bytesIn, ratio: 0, error: true };
+    return { output: content, wasModified: false, bytesIn, bytesOut: bytesIn, ratio: 0, error: true, reason: 'error-shape', stages: [] };
   }
   let value = parsed;
+  const stages = [];
   try {
-    if (cfg.adf) value = adfStage(value, cfg);
-    if (cfg.noise) value = noiseStage(value, cfg);
-    if (cfg.truncate) value = truncateStage(value, cfg);
-    value = crushValue(value, cfg);
-    if (cfg.toon) value = toonStage(value);
+    // The pipeline always runs; the compact()-per-stage byte-delta bookkeeping is opt-in (cfg.trace,
+    // set by the FND_MCP_SLIM_DEBUG feed). Off ⇒ the hot path serializes exactly ONCE (the final
+    // compact below) — no per-stage cost for a disabled feature, and `stages` stays empty.
+    let prev = cfg.trace ? compact(value) : '';
+    const runStage = (name, next) => {
+      value = next;
+      if (cfg.trace) { const cur = compact(value); if (cur !== prev) { stages.push(name); prev = cur; } }
+    };
+    if (cfg.adf) runStage('adf', adfStage(value, cfg));
+    if (cfg.noise) runStage('noise', noiseStage(value, cfg));
+    if (cfg.truncate) runStage('truncate', truncateStage(value, cfg));
+    runStage('crush', crushValue(value, cfg));
+    if (cfg.toon) runStage('toon', toonStage(value));
+    const output = compact(value);
+    const bytesOut = Buffer.byteLength(output, 'utf8');
+    return {
+      output,
+      wasModified: output !== content.trim(),
+      bytesIn,
+      bytesOut,
+      ratio: bytesIn ? 1 - bytesOut / bytesIn : 0,
+      stages,
+    };
   } catch (_) {
-    return { output: content, wasModified: false, bytesIn, bytesOut: bytesIn, ratio: 0 };
+    return { output: content, wasModified: false, bytesIn, bytesOut: bytesIn, ratio: 0, reason: 'transform-error', stages: [] };
   }
-  const output = compact(value);
-  const bytesOut = Buffer.byteLength(output, 'utf8');
-  return {
-    output,
-    wasModified: output !== content.trim(),
-    bytesIn,
-    bytesOut,
-    ratio: bytesIn ? 1 - bytesOut / bytesIn : 0,
-  };
 }
 
 // An MCP/tool error envelope — never compress these (write-gating elsewhere reads them verbatim).
@@ -1016,12 +1068,14 @@ module.exports = {
   classifyArray, computeOptimalK, analyseDictArray, isErrorShape,
   adfStage, noiseStage, truncateStage, toonStage,
   sweepSpills, spillTtlHours, spillRoot,
+  debugLog, debugEnabled,
   DEFAULTS,
 };
 
 // -------------------------------------------------------------------------------- CLI --
 
 if (require.main === module) {
+  const t0 = Date.now();
   const args = process.argv.slice(2);
   const has = (f) => args.includes(f);
   const opt = (f) => { const i = args.indexOf(f); return i !== -1 && args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : null; };
@@ -1049,11 +1103,25 @@ if (require.main === module) {
     raw = JSON.stringify(v === undefined ? null : v); // a missed path yields null, never a crash
   }
 
-  const res = slim(raw, cfg);
+  const res = slim(raw, { ...cfg, trace: debugEnabled() }); // trace only when the debug log will consume `stages`
   process.stdout.write(res.output + '\n');
   if (has('--stats')) {
     process.stderr.write(`json-slim: ${res.bytesIn} → ${res.bytesOut} bytes (${(res.ratio * 100).toFixed(1)}% reduction)${res.error ? ' [error-shape passthrough]' : ''}\n`);
   }
+  // Debug trace (opt-in FND_MCP_SLIM_DEBUG) — one JSONL line for this run; never touches stdout.
+  const compressed = res.wasModified && res.bytesOut < res.bytesIn;
+  debugLog({
+    entry: 'cli',
+    tool: fileArg || null,
+    decision: compressed ? 'compressed' : 'passthrough',
+    reason: compressed ? null : (res.reason || 'no-gain'),
+    bytes_in: res.bytesIn,
+    bytes_out: res.bytesOut,
+    pct: Math.round((res.ratio || 0) * 1000) / 10,
+    stages: res.stages || [],
+    spill: null,
+    ms: Date.now() - t0,
+  }, cfg.spillDir);
   // Spill hygiene at exit — prune stale spills (best-effort; never affects output or exit code).
   sweepSpills(cfg.spillDir);
 }

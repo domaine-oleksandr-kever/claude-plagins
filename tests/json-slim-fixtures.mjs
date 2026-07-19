@@ -263,5 +263,80 @@ eq('ttl-negative', J.spillTtlHours('-5'), 24); // a negative TTL must not become
   rmSync(dir, { recursive: true, force: true });
 }
 
+// ---------------------------------------------------------------- slim() instrumentation (M6) --
+// slim() reports the pipeline stages that actually changed bytes + a `reason` on non-compressing
+// outcomes — the FND_MCP_SLIM_DEBUG feed. Assert on a real fixture and the passthrough branches.
+{
+  // `stages` is opt-in (cfg.trace) — the debug feed sets it; a plain slim() call leaves it empty.
+  const r = J.slim(readFileSync(path.join(FIX, 'jira-issue-ELC-104.json'), 'utf8'), { trace: true });
+  check('slim-stages-array', Array.isArray(r.stages) && r.stages.includes('adf') && r.stages.includes('crush'), `stages ${JSON.stringify(r.stages)}`);
+  check('slim-stages-subset', r.stages.every((s) => ['adf', 'noise', 'truncate', 'crush', 'toon'].includes(s)), `unexpected stage in ${JSON.stringify(r.stages)}`);
+  eq('slim-stages-off-empty', J.slim(readFileSync(path.join(FIX, 'jira-issue-ELC-104.json'), 'utf8')).stages, []); // trace off ⇒ no bookkeeping
+  eq('slim-nonjson-reason', J.slim('plain text, not json').reason, 'non-json');
+  eq('slim-nonjson-stages', J.slim('plain text, not json').stages, []);
+  eq('slim-error-reason', J.slim(JSON.stringify({ errors: [{ message: 'boom' }] })).reason, 'error-shape');
+  check('slim-ok-no-reason', J.slim(JSON.stringify({ a: 1 })).reason === undefined, 'a compressible-shape result carries no reason');
+}
+
+// ---------------------------------------------------------------- debug log (M6) --
+// debugEnabled(): only 1/true/yes/on turns it on; unset / 0 / false → off (zero side effects).
+{
+  const prev = process.env.FND_MCP_SLIM_DEBUG;
+  const set = (v) => { if (v === undefined) delete process.env.FND_MCP_SLIM_DEBUG; else process.env.FND_MCP_SLIM_DEBUG = v; };
+  set(undefined); check('dbg-enabled-unset', J.debugEnabled() === false, 'unset → off');
+  set('1');       check('dbg-enabled-1', J.debugEnabled() === true, '1 → on');
+  set('true');    check('dbg-enabled-true', J.debugEnabled() === true, 'true → on');
+  set('0');       check('dbg-enabled-0', J.debugEnabled() === false, '0 → off');
+  set('false');   check('dbg-enabled-false', J.debugEnabled() === false, 'false → off');
+  set(prev);
+}
+
+// debugLog: disabled → creates nothing; enabled → appends one parseable JSONL line with `ts`.
+{
+  const dir = mkdtempSync(path.join(tmpdir(), 'jslim-dbg-'));
+  const prev = process.env.FND_MCP_SLIM_DEBUG;
+  const logp = path.join(dir, 'fnd-mcp-slim-debug.log');
+  delete process.env.FND_MCP_SLIM_DEBUG;
+  J.debugLog({ entry: 'cli', decision: 'passthrough' }, dir);
+  check('dbg-off-no-file', !existsSync(logp), 'disabled debugLog must not create a file');
+  process.env.FND_MCP_SLIM_DEBUG = '1';
+  J.debugLog({ entry: 'cli', decision: 'compressed', bytes_in: 100, bytes_out: 40 }, dir);
+  J.debugLog({ entry: 'cli', decision: 'passthrough', reason: 'size-gate' }, dir);
+  if (prev === undefined) delete process.env.FND_MCP_SLIM_DEBUG; else process.env.FND_MCP_SLIM_DEBUG = prev;
+  const lines = readFileSync(logp, 'utf8').trim().split('\n');
+  check('dbg-two-lines', lines.length === 2, `got ${lines.length} lines`);
+  const first = JSON.parse(lines[0]);
+  check('dbg-line-shape', first.entry === 'cli' && first.decision === 'compressed' && typeof first.ts === 'string', `line ${lines[0]}`);
+  rmSync(dir, { recursive: true, force: true });
+}
+
+// rotation: a log past ~5 MB is renamed to .log.1 before the next line lands in a fresh .log.
+{
+  const dir = mkdtempSync(path.join(tmpdir(), 'jslim-dbgrot-'));
+  const prev = process.env.FND_MCP_SLIM_DEBUG;
+  const logp = path.join(dir, 'fnd-mcp-slim-debug.log');
+  writeFileSync(logp, 'x'.repeat(5 * 1024 * 1024 + 1)); // just over the 5 MB cap
+  process.env.FND_MCP_SLIM_DEBUG = '1';
+  J.debugLog({ entry: 'cli', decision: 'compressed' }, dir);
+  if (prev === undefined) delete process.env.FND_MCP_SLIM_DEBUG; else process.env.FND_MCP_SLIM_DEBUG = prev;
+  check('dbg-rotated', existsSync(`${logp}.1`), 'oversize log rotated to .log.1');
+  check('dbg-fresh-line', readFileSync(logp, 'utf8').trim().split('\n').length === 1, 'fresh log holds exactly the new line');
+  rmSync(dir, { recursive: true, force: true });
+}
+
+// CLI entry logs `entry:"cli"` at exit with a compressed decision + stages (opt-in, no stdout impact).
+{
+  const dir = mkdtempSync(path.join(tmpdir(), 'jslim-dbgcli-'));
+  const out = execFileSync('node', [SLIM, path.join(FIX, 'figma-node-rest.json')],
+    { encoding: 'utf8', env: { ...process.env, FND_MCP_SLIM_DIR: dir, FND_MCP_SLIM_DEBUG: '1' } });
+  check('cli-dbg-output-intact', JSON.parse(out) && out.length > 0, 'CLI stdout still valid despite debug logging');
+  const line = JSON.parse(readFileSync(path.join(dir, 'fnd-mcp-slim-debug.log'), 'utf8').trim());
+  check('cli-dbg-entry', line.entry === 'cli', `entry ${line.entry}`);
+  check('cli-dbg-decision', line.decision === 'compressed', `decision ${line.decision}`);
+  check('cli-dbg-tool', typeof line.tool === 'string' && line.tool.endsWith('figma-node-rest.json'), `tool ${line.tool}`);
+  check('cli-dbg-stages', Array.isArray(line.stages) && line.stages.length > 0, `stages ${JSON.stringify(line.stages)}`);
+  rmSync(dir, { recursive: true, force: true });
+}
+
 console.log(`json-slim fixtures: ${pass} passed, ${fail} failed  (parity ${byteExact} byte-exact + ${valueOnly} value-parity of 17)`);
 if (fail) { console.log(failures.join('\n')); process.exit(1); }

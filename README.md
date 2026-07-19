@@ -354,7 +354,7 @@ not just AC verification. Details: `plugins/fnd/references/metafield-metaobject-
 
 ## Hooks
 
-The plugin wires four hook events (`plugin.json` → `hooks`); every hook fails open — a
+The plugin wires five hook events (`plugin.json` → `hooks`); every hook fails open — a
 hook error never blocks work:
 
 - **SessionStart** — injects the Foundation session conventions from `hooks/*.md`
@@ -378,6 +378,17 @@ hook error never blocks work:
   and the developer is shown that path to resubmit against — so the JSON is read with
   jq/Read on demand instead of sitting in context every turn. `FND_PROMPT_JSON=0` disables
   it.
+- **PostToolUse (`mcp__.*`)** — `mcp-slim.cjs` compresses large MCP tool results before they
+  enter context (`scripts/json-slim.cjs`: ADF→markdown, noise-drop, long-string truncate,
+  same-shape-array crush). Results ≤ 4 KB and error envelopes (`isError` / `errors[]`) pass
+  through untouched; the original is spilled to a file and referenced by a `<<full=…>>` handle
+  so nothing is lost. Stale spills are swept by an mtime TTL (`FND_MCP_SLIM_TTL`). `FND_MCP_SLIM=0`
+  disables it; `FND_MCP_SLIM_DIR` sets the spill directory. **Why wasn't a result compressed?**
+  set `FND_MCP_SLIM_DEBUG=1`, re-run, and read `<FND_MCP_SLIM_DIR>/fnd-mcp-slim-debug.log` — one
+  JSONL line per call records the `decision` and, on a passthrough, the `reason` (`size-gate`,
+  `error-shape`, `non-json`, `unrecognized-shape`, `no-gain`, …). *Coexistence:* if you also run
+  [`squeez`](https://github.com/claudioemmanuel/squeez), both its PostToolUse hook and `mcp-slim`
+  fire on `mcp__*` results — expect them to stack.
 
 ### Environment switches
 
@@ -396,6 +407,7 @@ added to this table.
 | `FND_MCP_SLIM` | `1` | `0` disables the MCP result compressor (PostToolUse `mcp-slim` hook) — node never spawns |
 | `FND_MCP_SLIM_DIR` | `os.tmpdir()` | directory where `json-slim` and the `mcp-slim` hook spill offloaded rows / the original result (the `full=<path>` handle) |
 | `FND_MCP_SLIM_TTL` | `24` | hours a spill file survives before the exit-time sweep prunes it (by mtime, so `full=` handles outlive same-day resume); `0` disables the sweep; any invalid value falls back to `24` |
+| `FND_MCP_SLIM_DEBUG` | off | opt-in (`1`/`true`): append one JSONL trace line per `mcp-slim` / `json-slim` invocation to `<FND_MCP_SLIM_DIR>/fnd-mcp-slim-debug.log` (decision, reason, bytes, %, stages — never any payload); rotates one generation at ~5 MB. Unset ⇒ no file written |
 | `FND_PROMPT_JSON` | `1` | `0` disables the prompt-JSON guard (UserPromptSubmit `prompt-json-guard` hook) — node never spawns |
 | `SHOPIFY_ADMIN_GQL_QUIET` | off | non-`0` value shortens the gql runner's engine-fallback note to `note=engine=token` |
 

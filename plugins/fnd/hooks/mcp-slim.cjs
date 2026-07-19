@@ -26,70 +26,81 @@
 //
 // Env: FND_MCP_SLIM (gated in plugin.json — node never spawns when 0);
 //      FND_MCP_SLIM_DIR (spill directory, shared with json-slim; default os.tmpdir());
-//      FND_MCP_SLIM_TTL (hours a spill survives before the exit-time sweep prunes it; default 24).
+//      FND_MCP_SLIM_TTL (hours a spill survives before the exit-time sweep prunes it; default 24);
+//      FND_MCP_SLIM_DEBUG (opt-in: one JSONL trace line per invocation to fnd-mcp-slim-debug.log).
 'use strict';
 
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { slim, sweepSpills, spillRoot } = require('../scripts/json-slim.cjs');
+const { slim, sweepSpills, spillRoot, debugLog, debugEnabled } = require('../scripts/json-slim.cjs');
 
 const GATE_BYTES = 4096; // only results larger than this are worth compressing
 
-// Slim one text payload. Error envelope / non-JSON / no byte gain → original unchanged.
-function slimText(text) {
+// Slim one text payload. Error envelope / non-JSON / no byte gain → original unchanged. `reason`
+// (null when modified) names the passthrough branch for the debug log; `stages` = the slim stages
+// that changed bytes (only populated when `trace`, i.e. FND_MCP_SLIM_DEBUG is on).
+function slimText(text, trace) {
   let res;
   try {
-    res = slim(text);
+    res = slim(text, { trace });
   } catch (_) {
-    return { text, modified: false };
+    return { text, modified: false, reason: 'transform-error', stages: [] };
   }
-  if (res.error) return { text, modified: false }; // error shape: verbatim
-  if (!res.wasModified || res.bytesOut >= res.bytesIn) return { text, modified: false };
-  return { text: res.output, modified: true };
+  if (res.error) return { text, modified: false, reason: 'error-shape', stages: [] }; // error shape: verbatim
+  if (!res.wasModified || res.bytesOut >= res.bytesIn) {
+    return { text, modified: false, reason: res.reason || 'no-gain', stages: res.stages || [] };
+  }
+  return { text: res.output, modified: true, reason: null, stages: res.stages || [] };
 }
 
 // Slim every text block in an MCP content array, preserving non-text and verbatim blocks
 // byte-for-byte. `markIndex` = the last block we actually compressed (-1 if none), so the
-// recovery handle never lands on a verbatim-preserved error block.
-function slimBlocks(blocks) {
+// recovery handle never lands on a verbatim-preserved error block. `reason` (unmodified case) is
+// the first non-modifying block reason; `stages` is the union across compressed blocks.
+function slimBlocks(blocks, trace) {
   let modified = false;
   let markIndex = -1;
+  let reason = null;
+  const stages = [];
   const out = blocks.map((b, i) => {
     if (b && typeof b === 'object' && typeof b.text === 'string') {
-      const r = slimText(b.text);
+      const r = slimText(b.text, trace);
       if (r.modified) {
         modified = true;
         markIndex = i;
+        for (const s of r.stages) if (!stages.includes(s)) stages.push(s);
         return { ...b, text: r.text };
       }
+      if (reason === null) reason = r.reason;
     }
     return b; // non-text or unchanged → untouched
   });
-  return { blocks: out, modified, markIndex };
+  return { blocks: out, modified, markIndex, reason: modified ? null : (reason || 'no-gain'), stages };
 }
 
-// Slim a tool result, mirroring its shape. Returns a descriptor for attachMarker.
-function slimResult(result) {
+// Slim a tool result, mirroring its shape. Returns a descriptor for attachMarker (+ reason/stages
+// for the debug log). `trace` (= debug on) gates the per-stage `stages` bookkeeping in slim().
+function slimResult(result, trace) {
   if (typeof result === 'string') {
-    const r = slimText(result);
-    return { value: r.text, modified: r.modified, kind: 'string' };
+    const r = slimText(result, trace);
+    return { value: r.text, modified: r.modified, kind: 'string', reason: r.reason, stages: r.stages };
   }
   if (Array.isArray(result)) {
-    const r = slimBlocks(result);
-    return { value: r.blocks, modified: r.modified, kind: 'array', markIndex: r.markIndex };
+    const r = slimBlocks(result, trace);
+    return { value: r.blocks, modified: r.modified, kind: 'array', markIndex: r.markIndex, reason: r.reason, stages: r.stages };
   }
   if (result && typeof result === 'object') {
     if (Array.isArray(result.content)) {
-      const r = slimBlocks(result.content);
-      return { value: { ...result, content: r.blocks }, modified: r.modified, kind: 'content', markIndex: r.markIndex };
+      const r = slimBlocks(result.content, trace);
+      return { value: { ...result, content: r.blocks }, modified: r.modified, kind: 'content', markIndex: r.markIndex, reason: r.reason, stages: r.stages };
     }
     if (typeof result.text === 'string') {
-      const r = slimText(result.text);
-      return { value: { ...result, text: r.text }, modified: r.modified, kind: 'single' };
+      const r = slimText(result.text, trace);
+      return { value: { ...result, text: r.text }, modified: r.modified, kind: 'single', reason: r.reason, stages: r.stages };
     }
   }
-  return { value: result, modified: false, kind: 'none' }; // unrecognized shape → no-op
+  return { value: result, modified: false, kind: 'none', reason: 'unrecognized-shape', stages: [] }; // unrecognized shape → no-op
 }
 
 // Append the recovery handle to the COMPRESSED text (never a verbatim/error block).
@@ -121,38 +132,65 @@ function spillOriginal(text) {
   }
 }
 
+// Byte length of a result value (best-effort; a non-serializable object → 0).
+function bytesOf(v) {
+  try { return Buffer.byteLength(typeof v === 'string' ? v : JSON.stringify(v), 'utf8'); } catch (_) { return 0; }
+}
+const pctOf = (inB, outB) => (inB ? Math.round((1 - outB / inB) * 1000) / 10 : 0);
+
 function run(raw) {
+  const t0 = Date.now();
+  const dbg = debugEnabled(); // cache: disabled → every trace() is a no-op and the metrics below are skipped
   const input = JSON.parse(raw);
+  const tool = typeof input.tool_name === 'string' ? input.tool_name : null;
   const result = input.tool_response !== undefined ? input.tool_response : input.tool_output;
-  if (result === undefined || result === null) return;
+
+  // One debug line per invocation (opt-in). Never touches stdout; the compressed path calls it
+  // AFTER writing the result. `decision:"compressed"` iff we emitted updatedToolOutput.
+  const trace = (decision, reason, bytesIn, bytesOut, stages, spill) => {
+    if (!dbg) return;
+    debugLog({
+      entry: 'hook', tool, decision, reason: reason || null,
+      bytes_in: bytesIn, bytes_out: bytesOut, pct: pctOf(bytesIn, bytesOut),
+      stages: stages || [], spill: spill || null, ms: Date.now() - t0,
+    });
+  };
+
+  if (result === undefined || result === null) return; // nothing arrived — not a compressor invocation
 
   // MCP error result — never touch (the model must see failures verbatim).
-  if (typeof result === 'object' && result.isError === true) return;
+  if (typeof result === 'object' && result.isError === true) {
+    if (dbg) { const b = bytesOf(result); trace('passthrough', 'error-shape', b, b, [], null); }
+    return;
+  }
 
   // Size gate on the serialized result.
   let serialized;
   try {
     serialized = typeof result === 'string' ? result : JSON.stringify(result);
   } catch (_) {
+    trace('passthrough', 'transform-error', 0, 0, [], null);
     return;
   }
-  if (Buffer.byteLength(serialized, 'utf8') <= GATE_BYTES) return;
+  const bytesIn = Buffer.byteLength(serialized, 'utf8');
+  if (bytesIn <= GATE_BYTES) { trace('passthrough', 'size-gate', bytesIn, bytesIn, [], null); return; }
 
-  const slimmed = slimResult(result);
-  if (!slimmed.modified) return; // no byte gain → passthrough
+  const slimmed = slimResult(result, dbg); // dbg gates slim()'s per-stage `stages` bookkeeping
+  if (!slimmed.modified) { trace('passthrough', slimmed.reason || 'no-gain', bytesIn, bytesIn, [], null); return; } // no byte gain → passthrough
 
   // Recovery net: spill the original before handing back a lossy result. No spill → passthrough.
   const fullPath = spillOriginal(serialized);
-  if (!fullPath) return;
+  if (!fullPath) { trace('passthrough', 'spill-write-failure', bytesIn, bytesIn, [], null); return; }
 
   const value = attachMarker(slimmed, `\n\n<<full=${fullPath} original_result>>`);
-  if (value === null) return; // could not attach a handle safely → passthrough (no orphan)
+  if (value === null) { trace('passthrough', 'transform-error', bytesIn, bytesIn, [], null); return; } // could not attach a handle safely → passthrough (no orphan)
 
   process.stdout.write(
     JSON.stringify({
       hookSpecificOutput: { hookEventName: 'PostToolUse', updatedToolOutput: value },
     }),
   );
+  if (dbg) trace('compressed', null, bytesIn, bytesOf(value), slimmed.stages, fullPath);
 }
 
 // Collect the whole stdin as bytes, then decode once — decoding per Buffer chunk would

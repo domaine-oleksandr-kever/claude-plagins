@@ -11,7 +11,9 @@
 #             big result compressed with a real full= spill, error/small results
 #             and unrecognized shapes pass through, node never spawns when disabled;
 #             M12–M16 the TTL sweep (stale pruned, fresh/foreign/debug-log kept,
-#             FND_MCP_SLIM_TTL=0 + throttle-marker skip)
+#             FND_MCP_SLIM_TTL=0 + throttle-marker skip); M17–M23 the FND_MCP_SLIM_DEBUG
+#             log (one JSONL line per invocation: compressed / size-gate / error-shape /
+#             non-json / unrecognized reasons, no file when off, rotation at ~5 MB)
 #   P cases — plugin.json UserPromptSubmit gate (FND_PROMPT_JSON) + hooks/
 #             prompt-json-guard.cjs: a big prompt carrying a big JSON blob is blocked
 #             with the blob spilled byte-exact, below-gate / no-json / small prompts
@@ -343,6 +345,65 @@ stale="$SWD/fnd-mcp-slim-STALE.json"; : > "$stale"; touch -t 200001010000 "$stal
 printf '%s' "$msin" | env FND_MCP_SLIM_DIR="$SWD" node "$SLIM" >/dev/null 2>&1
 if [ -f "$dbg" ] && [ -f "$dbg1" ]; then ok; else bad M16-debug-kept "sweep deleted the debug log"; fi
 if [ ! -f "$stale" ]; then ok; else bad M16-stale-swept "sweep missed a stale spill next to the debug log"; fi
+
+# ── M17–M23: FND_MCP_SLIM_DEBUG log (M6) ─────────────────────────────────────
+# One JSONL metadata line per invocation → <FND_MCP_SLIM_DIR>/fnd-mcp-slim-debug.log; opt-in, never
+# any payload content. Each case uses a dedicated dir so the single line is unambiguous.
+DBGLOG="fnd-mcp-slim-debug.log"
+run_dbg() { printf '%s' "$2" | env FND_MCP_SLIM_DIR="$1" FND_MCP_SLIM_DEBUG=1 node "$SLIM" 2>/dev/null; }
+
+# M17: DEBUG on + big result → exactly one line, decision compressed, sane bytes/pct, spill exists,
+# AND the emitted body is byte-identical to a DEBUG-off run (logging never alters the result).
+DBG="$TMP/dbg-m17"; mkdir -p "$DBG"
+outD="$(run_dbg "$DBG" "$msin")"; LOG="$DBG/$DBGLOG"
+assert_eq M17-one-line  "$(wc -l < "$LOG" 2>/dev/null | tr -d ' ')" 1
+assert_eq M17-entry     "$(jq -r '.entry'    "$LOG" 2>/dev/null)" "hook"
+assert_eq M17-decision  "$(jq -r '.decision' "$LOG" 2>/dev/null)" "compressed"
+bi="$(jq -r '.bytes_in' "$LOG" 2>/dev/null)"; bo="$(jq -r '.bytes_out' "$LOG" 2>/dev/null)"
+if [ "$bo" -lt "$bi" ]; then ok; else bad M17-bytes "bytes_out $bo not < bytes_in $bi"; fi
+if jq -e '.pct > 0' "$LOG" >/dev/null 2>&1; then ok; else bad M17-pct "pct not > 0"; fi
+sp="$(jq -r '.spill' "$LOG" 2>/dev/null)"
+if [ -n "$sp" ] && [ -f "$sp" ]; then ok; else bad M17-spill "spill file missing (sp='$sp')"; fi
+DBG0="$TMP/dbg-m17-off"; mkdir -p "$DBG0"
+outN="$(printf '%s' "$msin" | env FND_MCP_SLIM_DIR="$DBG0" node "$SLIM" 2>/dev/null)"
+assert_eq M17-body-identical "$(sweep_body "$outD")" "$(sweep_body "$outN")"
+
+# M18: MCP error result (isError:true) → passthrough logged as error-shape (still no stdout)
+DBG="$TMP/dbg-m18"; mkdir -p "$DBG"
+in="$(jq -n --rawfile t "$JIRA" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t}],isError:true}}')"
+assert_eq M18-passthrough "$(run_dbg "$DBG" "$in")" ""
+assert_eq M18-decision "$(jq -r '.decision' "$DBG/$DBGLOG" 2>/dev/null)" "passthrough"
+assert_eq M18-reason   "$(jq -r '.reason'   "$DBG/$DBGLOG" 2>/dev/null)" "error-shape"
+
+# M19: small result → passthrough logged as size-gate
+DBG="$TMP/dbg-m19"; mkdir -p "$DBG"
+run_dbg "$DBG" '{"tool_name":"mcp__x__y","tool_response":{"content":[{"type":"text","text":"{\"a\":1,\"b\":2}"}]}}' >/dev/null
+assert_eq M19-reason "$(jq -r '.reason' "$DBG/$DBGLOG" 2>/dev/null)" "size-gate"
+
+# M20: DEBUG unset → no log file created at all (zero side effects)
+DBG="$TMP/dbg-m20"; mkdir -p "$DBG"
+printf '%s' "$msin" | env FND_MCP_SLIM_DIR="$DBG" node "$SLIM" >/dev/null 2>&1
+if [ ! -f "$DBG/$DBGLOG" ]; then ok; else bad M20-no-log "debug log written with FND_MCP_SLIM_DEBUG unset"; fi
+
+# M21: rotation — a >5 MB log is renamed to .log.1 before the fresh line lands in a new .log
+DBG="$TMP/dbg-m21"; mkdir -p "$DBG"
+dd if=/dev/zero of="$DBG/$DBGLOG" bs=1024 count=5121 >/dev/null 2>&1   # ~5.001 MB, over the cap
+run_dbg "$DBG" "$msin" >/dev/null
+if [ -f "$DBG/$DBGLOG.1" ]; then ok; else bad M21-rotated "log > 5 MB not rotated to .log.1"; fi
+assert_eq M21-fresh-line "$(wc -l < "$DBG/$DBGLOG" 2>/dev/null | tr -d ' ')" 1
+
+# M22: big non-JSON text → passthrough logged as non-json
+DBG="$TMP/dbg-m22"; mkdir -p "$DBG"
+bignon="$(printf 'x%.0s' $(seq 1 5000))"
+in="$(jq -n --arg t "$bignon" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t}]}}')"
+run_dbg "$DBG" "$in" >/dev/null
+assert_eq M22-reason "$(jq -r '.reason' "$DBG/$DBGLOG" 2>/dev/null)" "non-json"
+
+# M23: unrecognized object shape (no text/content) → passthrough logged as unrecognized-shape
+DBG="$TMP/dbg-m23"; mkdir -p "$DBG"
+in="$(jq -cn '{tool_name:"mcp__x__y",tool_response:{stuff:[range(0;600)|{id:.,v:"padpadpadpad"}]}}')"
+run_dbg "$DBG" "$in" >/dev/null
+assert_eq M23-reason "$(jq -r '.reason' "$DBG/$DBGLOG" 2>/dev/null)" "unrecognized-shape"
 
 # ═══ P — UserPromptSubmit prompt-json-guard ═════════════════════════════════
 # Gate (FND_PROMPT_JSON) via the extracted plugin.json command[1]; behavior by piping
