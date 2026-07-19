@@ -535,8 +535,14 @@ function fillRemainingSlots(current, items, n, effectiveMax) {
 
 // ------------------------------------------------------------------------- markers / spill --
 
+// The one home for "where spills live" — shared by every writer (this module's crush spill, the
+// mcp-slim hook's whole-original spill) AND the sweep, so the sweep scans the same DIR we write to.
+function spillRoot(dir) {
+  return dir || process.env.FND_MCP_SLIM_DIR || os.tmpdir();
+}
+
 function spillPath(cfg) {
-  const dir = cfg.spillDir || process.env.FND_MCP_SLIM_DIR || os.tmpdir();
+  const dir = spillRoot(cfg.spillDir);
   try { fs.mkdirSync(dir, { recursive: true }); } catch (_) {}
   return path.join(dir, `fnd-crush-${crypto.randomUUID()}.json`);
 }
@@ -553,6 +559,72 @@ function buildMarker(originalItems, droppedItems, droppedCount, cfg) {
   // caller keeps the array uncrushed rather than emit a handle to a file that does not exist.
   try { fs.writeFileSync(p, compact(droppedItems)); } catch (_) { return null; }
   return `<<full=${p} ${droppedCount}_rows_offloaded>>`;
+}
+
+// ------------------------------------------------------------------------- spill hygiene --
+
+// The only file prefixes the sweep will ever delete. Keep in sync with the writers' filenames:
+// `spillPath` here (fnd-crush-), `spillOriginal` in hooks/mcp-slim.cjs (fnd-mcp-slim-), and
+// `spillBlob` in hooks/prompt-json-guard.cjs (fnd-prompt-json-, swept only when it lands in the
+// sweep dir). The literals are duplicated on purpose — importing this module into a per-prompt
+// hook just for a string would drag the whole compressor into every UserPromptSubmit.
+const SPILL_PREFIXES = ['fnd-crush-', 'fnd-mcp-slim-', 'fnd-prompt-json-'];
+// One directory scan per throttle window, gated by this marker's mtime — the hook's hot path
+// pays one stat, not a readdir of the whole tmpdir on every MCP call. A dotfile, so it matches
+// no SPILL_PREFIX (it is excluded for good measure anyway).
+const SWEEP_MARKER = '.fnd-mcp-slim-sweep';
+const SWEEP_THROTTLE_MS = 10 * 60 * 1000;
+// Files that share a spill prefix but must survive: a planned debug log + its one rotation, and the
+// marker itself. Excluded by EXACT name, so `fnd-mcp-slim-debug.log` is never mistaken for a spill.
+const SWEEP_KEEP = new Set(['fnd-mcp-slim-debug.log', 'fnd-mcp-slim-debug.log.1', SWEEP_MARKER]);
+
+// Parse FND_MCP_SLIM_TTL as hours. Default 24; exactly `0` disables the sweep. ANY invalid value —
+// non-numeric, NaN, negative — falls back to 24: a negative TTL must NEVER become a past cutoff
+// that mass-deletes fresh spills (the rule that keeps a typo safe). parseFloat, so `0.5` works.
+function spillTtlHours(raw) {
+  if (raw === undefined || raw === null || raw === '') return 24;
+  const n = parseFloat(raw);
+  if (!Number.isFinite(n) || n < 0) return 24;
+  return n;
+}
+
+// Age-based TTL sweep of the shared spill dir. Best-effort and fully self-contained: every error
+// is swallowed so a sweep NEVER affects the hook's emitted result or the CLI's output/exit code.
+// Deletes only our-prefixed files whose mtime is older than the TTL — files written by the current
+// process are always fresh, so an in-flight `full=<path>` handle survives up to the TTL (a day
+// covers same-day conversation resume; an older, expired handle is an already-tolerated re-fetch).
+// Called by BOTH entry points (the mcp-slim hook after it writes stdout, the CLI at exit) so one
+// implementation covers every writer. NB the prompt-json guard's WORKSPACE-placed spills ride with
+// the task workspace, outside this dir; its tmpdir spills are swept only when the sweep dir is the
+// default os.tmpdir() (FND_MCP_SLIM_DIR unset — the common case). Returns a small summary for tests.
+function sweepSpills(dir) {
+  const summary = { disabled: false, throttled: false, swept: 0 };
+  try {
+    const ttl = spillTtlHours(process.env.FND_MCP_SLIM_TTL);
+    if (ttl === 0) { summary.disabled = true; return summary; }
+    const root = spillRoot(dir);
+    const marker = path.join(root, SWEEP_MARKER);
+    const now = Date.now();
+    try {
+      if (now - fs.statSync(marker).mtimeMs < SWEEP_THROTTLE_MS) { summary.throttled = true; return summary; }
+    } catch (_) {} // no marker yet → first sweep in this dir
+    // Touch BEFORE scanning so a sibling hook firing during the scan sees a fresh marker and skips
+    // — one scan per window even under parallel MCP calls.
+    try { fs.writeFileSync(marker, ''); } catch (_) {}
+    const cutoff = now - ttl * 3600 * 1000;
+    let names;
+    try { names = fs.readdirSync(root); } catch (_) { return summary; }
+    for (const name of names) {
+      if (SWEEP_KEEP.has(name)) continue;
+      if (!SPILL_PREFIXES.some((p) => name.startsWith(p))) continue;
+      try {
+        const p = path.join(root, name);
+        const st = fs.statSync(p);
+        if (st.isFile() && st.mtimeMs < cutoff) { fs.unlinkSync(p); summary.swept++; }
+      } catch (_) {} // gone / racing another sweep / unreadable → skip
+    }
+  } catch (_) {} // any failure → no-op
+  return summary;
 }
 
 // ------------------------------------------------------------------------ per-type crush --
@@ -943,6 +1015,7 @@ module.exports = {
   slim, crush, crushValue,
   classifyArray, computeOptimalK, analyseDictArray, isErrorShape,
   adfStage, noiseStage, truncateStage, toonStage,
+  sweepSpills, spillTtlHours, spillRoot,
   DEFAULTS,
 };
 
@@ -981,4 +1054,6 @@ if (require.main === module) {
   if (has('--stats')) {
     process.stderr.write(`json-slim: ${res.bytesIn} → ${res.bytesOut} bytes (${(res.ratio * 100).toFixed(1)}% reduction)${res.error ? ' [error-shape passthrough]' : ''}\n`);
   }
+  // Spill hygiene at exit — prune stale spills (best-effort; never affects output or exit code).
+  sweepSpills(cfg.spillDir);
 }

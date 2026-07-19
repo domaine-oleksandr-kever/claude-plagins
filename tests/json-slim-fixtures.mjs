@@ -3,12 +3,13 @@
 // Three groups:
 //   parity:*   — the array-crush port vs Headroom's vendored SmartCrusher fixtures (byte-parity,
 //                or value-parity where JS number semantics prevent byte-parity);
-//   unit tests — each pipeline stage, the crush gates, markers, safety rails, CLI;
+//   unit tests — each pipeline stage, the crush gates, markers, safety rails, the spill-TTL
+//                sweep (M5: TTL parsing, prefix/exclude filtering, throttle), CLI;
 //   reduction:* — the M1 exit gate: ≥70% byte reduction on the real Jira + Figma fixtures.
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { readFileSync, readdirSync, rmSync, mkdtempSync } from 'node:fs';
+import { readFileSync, readdirSync, rmSync, mkdtempSync, writeFileSync, utimesSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -204,6 +205,62 @@ check('reduction:figma≥0.70', ratio('figma-node-rest.json') >= 0.70, `figma ra
   check('cli-jq', JSON.parse(jqOut)['3326:39542'] !== undefined, '--jq narrows to a sub-path');
   const jqMiss = execFileSync('node', [SLIM, '--jq', 'no.such.path', path.join(FIX, 'figma-node-rest.json')], { encoding: 'utf8' });
   check('cli-jq-missing', jqMiss.trim() === 'null', '--jq missing path → null, no crash');
+}
+
+// ---------------------------------------------------------------- spill-TTL sweep (M5) --
+// spillTtlHours contract: default 24, exactly 0 disables, ANY invalid/negative → 24 (never a
+// past cutoff that would mass-delete fresh spills).
+eq('ttl-default', J.spillTtlHours(undefined), 24);
+eq('ttl-empty', J.spillTtlHours(''), 24);
+eq('ttl-valid', J.spillTtlHours('12'), 12);
+eq('ttl-fractional', J.spillTtlHours('0.5'), 0.5);
+eq('ttl-zero-disables', J.spillTtlHours('0'), 0);
+eq('ttl-nonnumeric', J.spillTtlHours('abc'), 24);
+eq('ttl-negative', J.spillTtlHours('-5'), 24); // a negative TTL must not become "everything is old"
+
+// sweepSpills: seed a stale spill (mtime 1970) + a fresh one + a foreign-named + the debug log,
+// then sweep with the default 24 h TTL. Only our-prefixed stale files go; the summary reports 1.
+{
+  const dir = mkdtempSync(path.join(tmpdir(), 'jslim-sweep-'));
+  const seed = (name, old) => { const p = path.join(dir, name); writeFileSync(p, '[]'); if (old) utimesSync(p, 1000, 1000); return p; };
+  const stale = seed('fnd-crush-STALE.json', true);
+  const fresh = seed('fnd-mcp-slim-FRESH.json', false);
+  const foreign = seed('other-tool-STALE.json', true);
+  const dbg = seed('fnd-mcp-slim-debug.log', true);
+  const r = J.sweepSpills(dir);
+  check('sweep-stale-deleted', !existsSync(stale), 'our-prefixed stale spill must be deleted');
+  check('sweep-fresh-kept', existsSync(fresh), 'a fresh spill must survive (mtime, not a blanket rm)');
+  check('sweep-foreign-kept', existsSync(foreign), 'a non-prefixed file must never be touched');
+  check('sweep-debug-kept', existsSync(dbg), 'the M6 debug log is excluded by exact name');
+  check('sweep-summary', r.swept === 1 && !r.disabled && !r.throttled, `summary ${JSON.stringify(r)}`);
+  check('sweep-marker-made', existsSync(path.join(dir, '.fnd-mcp-slim-sweep')), 'throttle marker must be written');
+  // throttle: a second sweep sees the fresh marker and skips — a stale file seeded after survives
+  const stale2 = seed('fnd-crush-STALE2.json', true);
+  const r2 = J.sweepSpills(dir);
+  check('sweep-throttled', r2.throttled && existsSync(stale2), `throttle failed ${JSON.stringify(r2)}`);
+  rmSync(dir, { recursive: true, force: true });
+}
+// FND_MCP_SLIM_TTL=0 disables the sweep entirely (env save/restore — don't leak into later cases)
+{
+  const dir = mkdtempSync(path.join(tmpdir(), 'jslim-sweep0-'));
+  const p = path.join(dir, 'fnd-crush-S.json'); writeFileSync(p, '[]'); utimesSync(p, 1000, 1000);
+  const prev = process.env.FND_MCP_SLIM_TTL;
+  process.env.FND_MCP_SLIM_TTL = '0';
+  const r = J.sweepSpills(dir);
+  if (prev === undefined) delete process.env.FND_MCP_SLIM_TTL; else process.env.FND_MCP_SLIM_TTL = prev;
+  check('sweep-ttl0-disabled', r.disabled && existsSync(p), `TTL=0 must keep the stale spill ${JSON.stringify(r)}`);
+  rmSync(dir, { recursive: true, force: true });
+}
+// CLI entry sweeps at exit: a pre-seeded stale spill in FND_MCP_SLIM_DIR is gone after the run,
+// while stdout stays valid + compressed (the sweep never touches output/exit code).
+{
+  const dir = mkdtempSync(path.join(tmpdir(), 'jslim-cli-sweep-'));
+  const stale = path.join(dir, 'fnd-crush-STALE.json'); writeFileSync(stale, '[]'); utimesSync(stale, 1000, 1000);
+  const inp = readFileSync(path.join(FIX, 'figma-node-rest.json'), 'utf8');
+  const out = execFileSync('node', [SLIM], { input: inp, encoding: 'utf8', env: { ...process.env, FND_MCP_SLIM_DIR: dir } });
+  check('cli-sweeps-stale', !existsSync(stale), 'the CLI exit sweep must prune a stale spill');
+  check('cli-sweep-output-intact', out.length < inp.length && JSON.parse(out), 'CLI output stays valid + compressed despite the sweep');
+  rmSync(dir, { recursive: true, force: true });
 }
 
 console.log(`json-slim fixtures: ${pass} passed, ${fail} failed  (parity ${byteExact} byte-exact + ${valueOnly} value-parity of 17)`);

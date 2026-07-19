@@ -25,14 +25,14 @@
 //   - any parse/transform failure → passthrough.
 //
 // Env: FND_MCP_SLIM (gated in plugin.json — node never spawns when 0);
-//      FND_MCP_SLIM_DIR (spill directory, shared with json-slim; default os.tmpdir()).
+//      FND_MCP_SLIM_DIR (spill directory, shared with json-slim; default os.tmpdir());
+//      FND_MCP_SLIM_TTL (hours a spill survives before the exit-time sweep prunes it; default 24).
 'use strict';
 
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
-const { slim } = require('../scripts/json-slim.cjs');
+const { slim, sweepSpills, spillRoot } = require('../scripts/json-slim.cjs');
 
 const GATE_BYTES = 4096; // only results larger than this are worth compressing
 
@@ -111,7 +111,7 @@ function attachMarker(res, suffix) {
 // Spill the whole original result to a file; return its path, or null on failure.
 function spillOriginal(text) {
   try {
-    const dir = process.env.FND_MCP_SLIM_DIR || os.tmpdir();
+    const dir = spillRoot(); // same home the sweep scans — never drift
     fs.mkdirSync(dir, { recursive: true });
     const p = path.join(dir, `fnd-mcp-slim-${crypto.randomUUID()}.json`);
     fs.writeFileSync(p, text);
@@ -166,4 +166,7 @@ process.stdin.on('end', () => {
   } catch (_) {
     // Any failure → emit nothing, original result passes through untouched.
   }
+  // Spill hygiene runs AFTER the result is emitted (or passed through) so it never delays what
+  // the model sees; throttled and self-guarding, so it costs one stat on the hot path.
+  try { sweepSpills(); } catch (_) {}
 });

@@ -9,7 +9,9 @@
 #             window-override hint
 #   M cases — plugin.json PostToolUse gate (FND_MCP_SLIM) + hooks/mcp-slim.cjs:
 #             big result compressed with a real full= spill, error/small results
-#             and unrecognized shapes pass through, node never spawns when disabled
+#             and unrecognized shapes pass through, node never spawns when disabled;
+#             M12–M16 the TTL sweep (stale pruned, fresh/foreign/debug-log kept,
+#             FND_MCP_SLIM_TTL=0 + throttle-marker skip)
 #   P cases — plugin.json UserPromptSubmit gate (FND_PROMPT_JSON) + hooks/
 #             prompt-json-guard.cjs: a big prompt carrying a big JSON blob is blocked
 #             with the blob spilled byte-exact, below-gate / no-json / small prompts
@@ -287,6 +289,60 @@ assert_contains M11-updated "$out" "updatedToolOutput"
 if printf '%s' "$out" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>process.exit(/�/.test(s)?1:0))'; then ok; else bad M11-no-fffd-out "U+FFFD in emitted result"; fi
 sp="$(printf '%s' "$out" | jq -r '.hookSpecificOutput.updatedToolOutput.content[0].text' 2>/dev/null | grep -o 'full=[^ >]*' | head -1 | sed 's/^full=//')"
 if [ -n "$sp" ] && node -e 'const fs=require("fs");process.exit(/�/.test(fs.readFileSync(process.argv[1],"utf8"))?1:0)' "$sp"; then ok; else bad M11-no-fffd-spill "U+FFFD in recovery spill (sp='$sp')"; fi
+
+# ── M12–M16: spill-file hygiene (TTL sweep, M5) ──────────────────────────────
+# The hook calls sweepSpills() AFTER emitting; a dedicated spill dir per scenario keeps the
+# throttle-marker state controlled (M1–M11's $MSD already carries a fresh marker). `touch -t`
+# ages a seeded spill past the 24 h TTL. `msin` = the M1 content-array input for a real spill.
+msin="$(jq -n --rawfile t "$JIRA" \
+  '{tool_name:"mcp__plugin_fnd_atlassian__getJiraIssue",tool_response:{content:[{type:"text",text:$t}]}}')"
+sweep_body() { printf '%s' "$1" | jq -r '.hookSpecificOutput.updatedToolOutput.content[0].text' 2>/dev/null | sed 's/<<full=[^>]*>>//g'; }
+
+# M12: a hook run seeds its own FRESH spill and sweeps a pre-seeded STALE one — stale gone,
+# fresh kept, the hook's own new spill present, and the emitted body identical to a TTL=0 run.
+SWD="$TMP/sweep-m12"; mkdir -p "$SWD"
+stale="$SWD/fnd-crush-STALE.json"; : > "$stale"; touch -t 200001010000 "$stale"
+fresh="$SWD/fnd-mcp-slim-FRESH.json"; : > "$fresh"   # mtime now → must survive
+outS="$(printf '%s' "$msin" | env FND_MCP_SLIM_DIR="$SWD" node "$SLIM" 2>/dev/null)"
+if [ ! -f "$stale" ]; then ok; else bad M12-stale-swept "stale spill survived the sweep"; fi
+if [ -f "$fresh" ]; then ok; else bad M12-fresh-kept "fresh spill was swept"; fi
+np="$(printf '%s' "$outS" | jq -r '.hookSpecificOutput.updatedToolOutput.content[0].text' 2>/dev/null | grep -o 'full=[^ >]*' | tail -1 | sed 's/^full=//')"
+if [ -n "$np" ] && [ -f "$np" ]; then ok; else bad M12-newspill "hook's own spill missing (np='$np')"; fi
+SWD0="$TMP/sweep-m12-nosweep"; mkdir -p "$SWD0"
+outN="$(printf '%s' "$msin" | env FND_MCP_SLIM_DIR="$SWD0" FND_MCP_SLIM_TTL=0 node "$SLIM" 2>/dev/null)"
+assert_eq M12-body-identical "$(sweep_body "$outS")" "$(sweep_body "$outN")"
+
+# M13: FND_MCP_SLIM_TTL=0 disables the sweep → a stale spill survives
+SWD="$TMP/sweep-m13"; mkdir -p "$SWD"
+stale="$SWD/fnd-mcp-slim-STALE.json"; : > "$stale"; touch -t 200001010000 "$stale"
+printf '%s' "$msin" | env FND_MCP_SLIM_DIR="$SWD" FND_MCP_SLIM_TTL=0 node "$SLIM" >/dev/null 2>&1
+if [ -f "$stale" ]; then ok; else bad M13-ttl0-keeps-stale "TTL=0 still swept a stale spill"; fi
+
+# M14: a stale FOREIGN-named file (not our prefix) survives; our stale one is swept
+SWD="$TMP/sweep-m14"; mkdir -p "$SWD"
+foreign="$SWD/other-tool-STALE.json"; : > "$foreign"; touch -t 200001010000 "$foreign"
+ourstale="$SWD/fnd-crush-STALE.json"; : > "$ourstale"; touch -t 200001010000 "$ourstale"
+printf '%s' "$msin" | env FND_MCP_SLIM_DIR="$SWD" node "$SLIM" >/dev/null 2>&1
+if [ -f "$foreign" ]; then ok; else bad M14-foreign-kept "sweep deleted a foreign-named file"; fi
+if [ ! -f "$ourstale" ]; then ok; else bad M14-ours-swept "sweep missed our stale file"; fi
+
+# M15: throttle — run 1 leaves a fresh marker; a stale spill seeded AFTER it survives run 2
+SWD="$TMP/sweep-m15"; mkdir -p "$SWD"
+printf '%s' "$msin" | env FND_MCP_SLIM_DIR="$SWD" node "$SLIM" >/dev/null 2>&1
+if [ -f "$SWD/.fnd-mcp-slim-sweep" ]; then ok; else bad M15-marker "run 1 did not create the sweep marker"; fi
+stale="$SWD/fnd-crush-STALE.json"; : > "$stale"; touch -t 200001010000 "$stale"
+printf '%s' "$msin" | env FND_MCP_SLIM_DIR="$SWD" node "$SLIM" >/dev/null 2>&1
+if [ -f "$stale" ]; then ok; else bad M15-throttled "throttle failed: stale swept despite a fresh marker"; fi
+
+# M16: the M6 debug log + its rotation are excluded by exact name even when stale (a real spill
+# alongside them is still swept, proving the exclusion is name-based, not a blanket skip)
+SWD="$TMP/sweep-m16"; mkdir -p "$SWD"
+dbg="$SWD/fnd-mcp-slim-debug.log"; : > "$dbg"; touch -t 200001010000 "$dbg"
+dbg1="$SWD/fnd-mcp-slim-debug.log.1"; : > "$dbg1"; touch -t 200001010000 "$dbg1"
+stale="$SWD/fnd-mcp-slim-STALE.json"; : > "$stale"; touch -t 200001010000 "$stale"
+printf '%s' "$msin" | env FND_MCP_SLIM_DIR="$SWD" node "$SLIM" >/dev/null 2>&1
+if [ -f "$dbg" ] && [ -f "$dbg1" ]; then ok; else bad M16-debug-kept "sweep deleted the debug log"; fi
+if [ ! -f "$stale" ]; then ok; else bad M16-stale-swept "sweep missed a stale spill next to the debug log"; fi
 
 # ═══ P — UserPromptSubmit prompt-json-guard ═════════════════════════════════
 # Gate (FND_PROMPT_JSON) via the extracted plugin.json command[1]; behavior by piping
