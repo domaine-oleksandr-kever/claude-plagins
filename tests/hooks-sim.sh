@@ -7,6 +7,9 @@
 #   C cases — hooks/context-stats.cjs against transcript fixtures: synthetic
 #             (API-error) entries skipped, FND_CTX_WARN=0 honored, >100%
 #             window-override hint
+#   M cases — plugin.json PostToolUse gate (FND_MCP_SLIM) + hooks/mcp-slim.cjs:
+#             big result compressed with a real full= spill, error/small results
+#             and unrecognized shapes pass through, node never spawns when disabled
 # Commands under test are extracted from plugin.json, not duplicated here.
 # Exit 0 = all green.
 set -u
@@ -179,6 +182,103 @@ out="$(run_ctx "$TMP/t3.jsonl" "c9-$$" FND_CTX_WARN=80)"   # 77% < 80 → silent
 assert_absent   C9-below-warn "$out" "additionalContext"
 out="$(run_ctx "$TMP/t4.jsonl" "c9-$$" FND_CTX_WARN=80)"   # 85% ≥ 80 → warn entry emits
 assert_contains C9-warn-entry "$out" "additionalContext"
+
+# ═══ M — PostToolUse mcp-slim (result compressor) ═══════════════════════════
+# Gate (FND_MCP_SLIM) tested via the extracted plugin.json command + node shim;
+# hook behavior tested by invoking mcp-slim.cjs directly on PostToolUse-shaped input.
+SLIM="$ROOT/plugins/fnd/hooks/mcp-slim.cjs"
+FIX="$ROOT/tests/fixtures"
+JIRA="$FIX/jira-issue-ELC-104.json"
+PTU_CMD="$(jq -r '.hooks.PostToolUse[0].hooks[0].command' "$MANIFEST")"
+MSD="$TMP/slim-spill"; mkdir -p "$MSD"
+
+run_slim() { # input-json [VAR=val…] — pipe input to the hook, echo its stdout
+  local in="$1"; shift
+  printf '%s' "$in" | env FND_MCP_SLIM_DIR="$MSD" "$@" node "$SLIM" 2>/dev/null
+}
+
+# M1: big MCP result (content-array shape) → updatedToolOutput + a full= spill that exists
+in="$(jq -n --rawfile t "$JIRA" \
+  '{tool_name:"mcp__plugin_fnd_atlassian__getJiraIssue",tool_response:{content:[{type:"text",text:$t}]}}')"
+out="$(run_slim "$in")"
+assert_contains M1-updated   "$out" "updatedToolOutput"
+assert_contains M1-hookevent "$out" "PostToolUse"
+text="$(printf '%s' "$out" | jq -r '.hookSpecificOutput.updatedToolOutput.content[0].text' 2>/dev/null)"
+p="$(printf '%s' "$text" | grep -o 'full=[^ >]*' | head -1 | sed 's/^full=//')"
+if [ -n "$p" ] && [ -f "$p" ]; then ok; else bad M1-fullfile "no existing full= file (p='$p')"; fi
+inb=$(printf '%s' "$in" | wc -c); outb=$(printf '%s' "$out" | wc -c)
+if [ "$outb" -lt "$inb" ]; then ok; else bad M1-smaller "output $outb not < input $inb"; fi
+
+# M2: MCP error result (isError:true) → untouched, even when big
+in="$(jq -n --rawfile t "$JIRA" \
+  '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t}],isError:true}}')"
+assert_eq M2-iserror-passthrough "$(run_slim "$in")" ""
+
+# M3: error envelope in the text (errors:[…]) → untouched (write-gating reads it verbatim)
+err="$(jq -cn '{errors:[{message:"boom"}],filler:[range(0;600)|{id:.,note:"padding-padding-padding"}]}')"
+in="$(jq -n --arg t "$err" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t}]}}')"
+assert_eq M3-errenvelope-passthrough "$(run_slim "$in")" ""
+
+# M4: small result (≤ 4 KB gate) → untouched
+in='{"tool_name":"mcp__x__y","tool_response":{"content":[{"type":"text","text":"{\"a\":1,\"b\":2}"}]}}'
+assert_eq M4-small-passthrough "$(run_slim "$in")" ""
+
+# M5: transform crash / non-JSON → passthrough (outer try, then slim's parse guard)
+assert_eq M5a-malformed-input "$(run_slim 'not json at all')" ""
+bignon="$(printf 'x%.0s' $(seq 1 5000))"   # 5000 non-JSON chars, over the size gate
+in="$(jq -n --arg t "$bignon" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t}]}}')"
+assert_eq M5b-big-nonjson "$(run_slim "$in")" ""
+
+# M6: FND_MCP_SLIM gate — 0 means node never spawns; unset means it runs ($shim/$fake from G/S)
+run_ptu_gate() { : > "$TMP/node.log"; env "$@" NODE_LOG="$TMP/node.log" PATH="$shim:$PATH" \
+  CLAUDE_PLUGIN_ROOT="$fake" bash -c "$PTU_CMD" >/dev/null 2>&1; }
+run_ptu_gate FND_MCP_SLIM=0; ec=$?
+assert_eq M6-off-exit "$ec" 0
+if [ -s "$TMP/node.log" ]; then bad M6-off "node ran with FND_MCP_SLIM=0"; else ok; fi
+run_ptu_gate; ec=$?
+assert_eq M6-default-exit "$ec" 0
+if [ -s "$TMP/node.log" ]; then ok; else bad M6-default "node did not run by default"; fi
+
+# M7: raw-string result shape → compressed string (mirrors input shape, carries full=)
+in="$(jq -n --rawfile t "$JIRA" '{tool_name:"mcp__x__y",tool_response:$t}')"
+out="$(run_slim "$in")"
+assert_contains M7-rawstring-updated "$out" "updatedToolOutput"
+assert_contains M7-rawstring-full    "$out" "full="
+
+# M8: docs-variant input field name (tool_output) is honored like tool_response
+in="$(jq -n --rawfile t "$JIRA" '{tool_name:"mcp__x__y",tool_output:{content:[{type:"text",text:$t}]}}')"
+assert_contains M8-tooloutput-updated "$(run_slim "$in")" "updatedToolOutput"
+
+# M9: unrecognized result shape (object, no text/content) → passthrough (scope boundary)
+in="$(jq -cn '{tool_name:"mcp__x__y",tool_response:{stuff:[range(0;600)|{id:.,v:"padpadpadpad"}]}}')"
+assert_eq M9-unrecognized-passthrough "$(run_slim "$in")" ""
+
+# M10: mixed content [compressible, TRAILING error envelope] — the recovery handle rides
+# the compressed block; the verbatim error block stays byte-identical & JSON-parseable
+comp="$(jq -cn '{rows:[range(0;600)|{id:.,note:"padding-padding-padding"}]}')"
+errb='{"errors":[{"message":"insufficient permissions"}]}'
+in="$(jq -n --arg c "$comp" --arg e "$errb" \
+  '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$c},{type:"text",text:$e}]}}')"
+out="$(run_slim "$in")"
+assert_contains M10-updated "$out" "updatedToolOutput"
+b0="$(printf '%s' "$out" | jq -r '.hookSpecificOutput.updatedToolOutput.content[0].text' 2>/dev/null)"
+b1="$(printf '%s' "$out" | jq -r '.hookSpecificOutput.updatedToolOutput.content[1].text' 2>/dev/null)"
+assert_contains M10-marker-on-block0 "$b0" "full="
+assert_eq       M10-errblock-verbatim "$b1" "$errb"
+if printf '%s' "$b1" | jq -e . >/dev/null 2>&1; then ok; else bad M10-errblock-json "error block no longer parses"; fi
+
+# M11: large multibyte payload survives stdin chunking — no U+FFFD in the emitted result
+# OR the recovery spill (regression for per-Buffer-chunk decoding across a read boundary)
+node -e '
+  const rows = Array.from({length:4000},(_,i)=>({id:i,note:"がぎぐげご漢字テスト日本語サンプル",emoji:"🍣🎏🍜"}));
+  const tr = {content:[{type:"text",text:JSON.stringify({items:rows})}]};
+  process.stdout.write(JSON.stringify({tool_name:"mcp__x__y",tool_response:tr}));
+' > "$TMP/utf8-in.json"
+out="$(FND_MCP_SLIM_DIR="$MSD" node "$SLIM" < "$TMP/utf8-in.json" 2>/dev/null)"
+assert_contains M11-updated "$out" "updatedToolOutput"
+if printf '%s' "$out" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>process.exit(/�/.test(s)?1:0))'; then ok; else bad M11-no-fffd-out "U+FFFD in emitted result"; fi
+sp="$(printf '%s' "$out" | jq -r '.hookSpecificOutput.updatedToolOutput.content[0].text' 2>/dev/null | grep -o 'full=[^ >]*' | head -1 | sed 's/^full=//')"
+if [ -n "$sp" ] && node -e 'const fs=require("fs");process.exit(/�/.test(fs.readFileSync(process.argv[1],"utf8"))?1:0)' "$sp"; then ok; else bad M11-no-fffd-spill "U+FFFD in recovery spill (sp='$sp')"; fi
 
 echo "hooks sim: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then
