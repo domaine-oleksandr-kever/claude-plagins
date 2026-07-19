@@ -48,8 +48,8 @@ The Preview row needs an unpublished theme that shows **this branch's code** wit
 **not** clone the dev theme's code (which may be stale or broken); code always comes from the
 branch. The script reads the store / dev-theme-id / Theme Access token from `shopify.theme.toml`
 (the **uncommented** `theme = "…"` line). To redeploy code into an existing preview theme later
-(e.g. after a fix) without disturbing its settings, the `refresh` mode / `update-preview-theme`
-skill pushes code only.
+(e.g. after a fix) without disturbing its settings, the `refresh` mode (the
+`preview-theme` skill) pushes code only.
 
 > **Settings ↔ code drift (`error=settings_drift`):** the dev theme can be **"ahead"** of this
 > branch — e.g. its `templates/product.json` references a block type (`subscription_selector`) whose

@@ -18,7 +18,7 @@ in its own subfolder under `plugins/`:
 │   └── fnd/                      # the Foundation plugin (self-contained)
 │       ├── .claude-plugin/
 │       │   └── plugin.json       # plugin manifest (+ bundled mcpServers)
-│       ├── skills/               # 18 workflow skills (see table below)
+│       ├── skills/               # 16 workflow skills (see table below)
 │       │   ├── develop-feature-or-fix/SKILL.md
 │       │   └── ...
 │       ├── agents/               # subagents the skills delegate to
@@ -70,8 +70,7 @@ To add another plugin later: create `plugins/<name>/` (with its own
 | `write-steps-to-test`             | `/fnd:write-steps-to-test` |
 | `create-pull-request`             | `/fnd:create-pull-request` |
 | `ship`                            | `/fnd:ship` |
-| `create-preview-theme`            | `/fnd:create-preview-theme` |
-| `update-preview-theme`            | `/fnd:update-preview-theme` |
+| `preview-theme`                   | `/fnd:preview-theme` |
 | `pre-commit-review`               | `/fnd:pre-commit-review` |
 | `commit`                          | `/fnd:commit` |
 | `preflight-checks`                | `/fnd:preflight-checks` |
@@ -80,7 +79,6 @@ To add another plugin later: create `plugins/<name>/` (with its own
 | `get-breaking-changes`            | `/fnd:get-breaking-changes` |
 | `fix-breaking-changes`            | `/fnd:fix-breaking-changes` |
 | `update-translations`             | `/fnd:update-translations` |
-| `update-schema-translations`      | `/fnd:update-schema-translations` |
 | `report-plugin-issue`             | `/fnd:report-plugin-issue` |
 
 Skills are also **auto-invoked**: Claude reads each skill's `description` and
