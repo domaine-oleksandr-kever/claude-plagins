@@ -382,6 +382,7 @@ added to this table.
 | `FND_CTX_MONITOR` | `1` | `0` disables the context-usage monitor |
 | `FND_CTX_WARN` | `40` | context warn threshold, % of the window |
 | `FND_CTX_WINDOW` | auto | override the assumed context window size (tokens) |
+| `FND_MCP_SLIM_DIR` | `os.tmpdir()` | directory where `json-slim` spills offloaded array rows (the `full=<path>` crush handle) |
 | `SHOPIFY_ADMIN_GQL_QUIET` | off | non-`0` value shortens the gql runner's engine-fallback note to `note=engine=token` |
 
 ## Lean-code convention

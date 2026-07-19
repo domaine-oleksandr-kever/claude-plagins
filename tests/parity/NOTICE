@@ -1,0 +1,29 @@
+json-slim.cjs — array-crush port attribution
+=============================================
+
+plugins/fnd/scripts/json-slim.cjs contains a JavaScript re-implementation of the
+deterministic (empty-query) path of Headroom's SmartCrusher JSON array compressor.
+
+  Headroom
+  Copyright 2025 Headroom Contributors
+  https://github.com/headroomlabs-ai/headroom
+  Licensed under the Apache License, Version 2.0.
+
+The port is a MODIFIED derivative: it is written from scratch in Node.js (Headroom's
+live implementation is Rust), diverges deliberately from upstream (it spills dropped
+array rows to a file referenced as `full=<path>` instead of Headroom's content-addressed
+`<<ccr:HASH …>>` handle, and it uses a distinct-count uniqueness budget in place of
+Headroom's SimHash + Kneedle `compute_optimal_k`), and adds fnd-specific pipeline stages
+(ADF→markdown, noise drop, long-string truncation) that are not part of SmartCrusher.
+
+The fixtures under tests/parity/fixtures/smart_crusher/ are copied verbatim from the
+Headroom repository (tests/parity/fixtures/smart_crusher/, same Apache-2.0 license). They
+are the porting contract: tests/json-slim-fixtures.mjs runs the port against them and
+pins byte-parity (16/17) or, where JavaScript number semantics prevent it, value-parity
+(1/17 — the time_series fixture, whose float-valued whole numbers `0.0` re-serialize to
+`0`).
+
+A full copy of the Apache License, Version 2.0 is available at
+https://www.apache.org/licenses/LICENSE-2.0 . This project as a whole is MIT-licensed
+(see repo LICENSE); this NOTICE records the third-party attribution for the ported code
+and the vendored fixtures only.

@@ -1,0 +1,63 @@
+<frame id="3326:39542" name="PLP / Semi-Custom Bundle Card / Desktop" x="-22345" y="0" width="1440" height="1394.06884765625">
+  <frame id="3326:39543" name="Global Header" x="0" y="0" width="1440" height="134.44374084472656">
+    <instance id="3326:39544" name="Announcement Bar" x="0" y="0" width="1440" height="38" />
+    <instance id="3326:39545" name="Header" x="0" y="38" width="1440" height="96.44374084472656" />
+  </frame>
+  <instance id="3326:39546" name="Breadcrumbs" x="0" y="134.44374084472656" width="1440" height="49.000099182128906" />
+  <instance id="3326:39547" name="Collection Banner" x="0" y="183.44384765625" width="1440" height="73" />
+  <instance id="3326:39548" name="Filter Bar" x="0" y="256.44384765625" width="1440" height="72" />
+  <frame id="5426:82436" name="Frame 1984078820" x="0" y="328.44384765625" width="1440" height="1065.625">
+    <instance id="5426:82462" name="Filter Menu" x="0" y="0" width="270" height="1065.625">
+      <frame id="22128:16233" name="Content" x="0" y="0" width="270" height="196.00039672851562">
+        <instance id="22128:16234" name="Filter Group" x="0" y="0" width="270" height="49.000099182128906">
+          <instance id="22128:16235" name="Accordion" x="16" y="0" width="238" height="49.000099182128906">
+            <frame id="22128:16239" name="Frame 508" x="0" y="16" width="238" height="17.000099182128906">
+              <instance id="22128:16242" name="Heading" x="0" y="0" width="216" height="17.000099182128906" />
+              <instance id="22128:16247" name="Icons" x="224" y="1.5000495910644531" width="14" height="14" />
+            </frame>
+            <slot id="22128:16252" name="Content" x="0" y="36.000099182128906" width="300" height="60.000099182128906" hidden="true" />
+            <frame id="22128:16253" name="Frame 1087386" x="0" y="96.00029754638672" width="300" height="0.00009999999747378752" hidden="true" />
+          </instance>
+        </instance>
+        <frame id="22128:16254" name="Filter Group" x="8" y="278.0000915527344" width="404" height="170" hidden="true" />
+        <instance id="22128:16255" name="Filter Group" x="0" y="49.000099182128906" width="270" height="49.000099182128906">
+          <instance id="22128:16256" name="Accordion" x="16" y="0" width="238" height="49.000099182128906">
+            <frame id="22128:16257" name="Frame 508" x="0" y="16" width="238" height="17.000099182128906">
+              <instance id="22128:16258" name="Heading" x="0" y="0" width="216" height="17.000099182128906" />
+              <instance id="22128:16262" name="Icons" x="224" y="1.5000495910644531" width="14" height="14" />
+            </frame>
+            <slot id="22128:16265" name="Content" x="0" y="36.000099182128906" width="300" height="60.000099182128906" hidden="true" />
+            <frame id="22128:16266" name="Frame 1087386" x="0" y="96.00029754638672" width="300" height="0.00009999999747378752" hidden="true" />
+          </instance>
+        </instance>
+        <instance id="22128:16267" name="Filter Group" x="0" y="98.00018310546875" width="270" height="49.000099182128906">
+          <instance id="22128:16268" name="Accordion" x="16" y="0" width="238" height="49.000099182128906">
+            <frame id="22128:16269" name="Frame 508" x="0" y="16" width="238" height="17.000099182128906">
+              <instance id="22128:16270" name="Heading" x="0" y="0" width="216" height="17.000099182128906" />
+              <instance id="22128:16274" name="Icons" x="224" y="1.5000495910644531" width="14" height="14" />
+            </frame>
+            <slot id="22128:16277" name="Content" x="0" y="36.000099182128906" width="300" height="60.000099182128906" hidden="true" />
+            <frame id="22128:16278" name="Frame 1087386" x="0" y="96.00029754638672" width="300" height="0.00009999999747378752" hidden="true" />
+          </instance>
+        </instance>
+        <instance id="22128:16279" name="Filter Group" x="0" y="147.00030517578125" width="270" height="49.000099182128906">
+          <instance id="22128:16280" name="Accordion" x="16" y="0" width="238" height="49.000099182128906">
+            <frame id="22128:16281" name="Frame 508" x="0" y="16" width="238" height="17.000099182128906">
+              <instance id="22128:16282" name="Heading" x="0" y="0" width="216" height="17.000099182128906" />
+              <instance id="22128:16286" name="Icons" x="224" y="1.5000495910644531" width="14" height="14" />
+            </frame>
+            <slot id="22128:16289" name="Content" x="0" y="36.000099182128906" width="300" height="60.000099182128906" hidden="true" />
+            <frame id="22128:16290" name="Frame 1087386" x="0" y="96.00029754638672" width="300" height="0.00009999999747378752" hidden="true" />
+          </instance>
+        </instance>
+        <frame id="22128:16291" name="Frame 48100740" x="8" y="724.0001831054688" width="404" height="70" hidden="true" />
+      </frame>
+    </instance>
+    <frame id="5426:82463" name="PLP Grid" x="273" y="0" width="1167" height="1065.625">
+      <instance id="9639:136154" name="Product Card" x="390" y="0" width="387" height="625" />
+      <instance id="9639:136204" name="Product Card" x="780" y="0" width="387" height="625" />
+      <instance id="5426:82466" name="In-Grid Content" x="0" y="628" width="1167" height="437.6249694824219" />
+      <instance id="5426:82467" name="Product Card" x="0" y="0" width="387" height="625" />
+    </frame>
+  </frame>
+</frame>

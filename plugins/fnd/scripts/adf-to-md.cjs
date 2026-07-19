@@ -189,7 +189,20 @@ function renderBlock(node, depth) {
   }
 }
 
-const doc = findDoc(readJSON());
-if (!doc) { process.stderr.write('adf-to-md: no ADF doc node found in input\n'); process.exit(1); }
-const md = (doc.content || []).map((b) => renderBlock(b)).join('\n\n').replace(/\n{3,}/g, '\n\n').trim();
-process.stdout.write(md + '\n');
+// Convert an ADF doc — or any wrapper object that contains one — to Markdown.
+// Returns null when no ADF doc node is present. This is the single home of the
+// converter: json-slim.cjs require()s it for the ADF-detection compression stage,
+// and the CLI below is the same call over stdin/a file.
+function adfToMarkdown(input) {
+  const doc = findDoc(input);
+  if (!doc) return null;
+  return (doc.content || []).map((b) => renderBlock(b)).join('\n\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+module.exports = { adfToMarkdown, findDoc, renderBlock, inline, renderText, cardUrl };
+
+if (require.main === module) {
+  const md = adfToMarkdown(readJSON());
+  if (md == null) { process.stderr.write('adf-to-md: no ADF doc node found in input\n'); process.exit(1); }
+  process.stdout.write(md + '\n');
+}
