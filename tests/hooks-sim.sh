@@ -10,6 +10,14 @@
 #   M cases — plugin.json PostToolUse gate (FND_MCP_SLIM) + hooks/mcp-slim.cjs:
 #             big result compressed with a real full= spill, error/small results
 #             and unrecognized shapes pass through, node never spawns when disabled
+#   P cases — plugin.json UserPromptSubmit gate (FND_PROMPT_JSON) + hooks/
+#             prompt-json-guard.cjs: a big prompt carrying a big JSON blob is blocked
+#             with the blob spilled byte-exact, below-gate / no-json / small prompts
+#             pass through, string-aware + conservative extraction, workspace placement,
+#             spill-failure never blocks, node never spawns when disabled
+#   T cases — hooks/subagent-conventions.sh: code-writing / unknown agents get the
+#             conventions, read-only readers AND jira-writer are skipped, FND_LEAN=0
+#             drops lean-code, the hook always exits 0
 # Commands under test are extracted from plugin.json, not duplicated here.
 # Exit 0 = all green.
 set -u
@@ -279,6 +287,223 @@ assert_contains M11-updated "$out" "updatedToolOutput"
 if printf '%s' "$out" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>process.exit(/�/.test(s)?1:0))'; then ok; else bad M11-no-fffd-out "U+FFFD in emitted result"; fi
 sp="$(printf '%s' "$out" | jq -r '.hookSpecificOutput.updatedToolOutput.content[0].text' 2>/dev/null | grep -o 'full=[^ >]*' | head -1 | sed 's/^full=//')"
 if [ -n "$sp" ] && node -e 'const fs=require("fs");process.exit(/�/.test(fs.readFileSync(process.argv[1],"utf8"))?1:0)' "$sp"; then ok; else bad M11-no-fffd-spill "U+FFFD in recovery spill (sp='$sp')"; fi
+
+# ═══ P — UserPromptSubmit prompt-json-guard ═════════════════════════════════
+# Gate (FND_PROMPT_JSON) via the extracted plugin.json command[1]; behavior by piping
+# UserPromptSubmit-shaped input to the hook. $shim/$fake come from the G/M scaffolding.
+GUARD="$ROOT/plugins/fnd/hooks/prompt-json-guard.cjs"
+PJ_GATE="$(jq -r '.hooks.UserPromptSubmit[0].hooks[1].command' "$MANIFEST")"
+PJD="$TMP/pj-spill"; mkdir -p "$PJD"
+
+# Build a UserPromptSubmit input: a JSON blob of ~blobBytes wrapped in prose padded so the
+# whole prompt is ~promptBytes. Writes the canonical blob to $4 for byte-exact comparison.
+mk() { # blobBytes promptBytes cwd blobfile
+  node -e '
+    const fs=require("fs");
+    const tb=+process.argv[1], tp=+process.argv[2], cwd=process.argv[3], bf=process.argv[4];
+    let items=[],blob;
+    do{items.push({id:items.length,pad:"x".repeat(40)});blob=JSON.stringify({items});}while(blob.length<tb);
+    fs.writeFileSync(bf,blob);
+    const need=Math.max(0, tp-blob.length-2);
+    const prompt=(need?"z".repeat(need)+"\n":"")+blob;
+    process.stdout.write(JSON.stringify({prompt,cwd}));
+  ' "$1" "$2" "$3" "$4"
+}
+run_guard() { printf '%s' "$1" | env TMPDIR="$PJD" "${@:2}" node "$GUARD" 2>/dev/null; }
+reason_path() { printf '%s' "$1" | jq -r '.reason' 2>/dev/null \
+  | grep -oE '/[^[:space:]]+fnd-prompt-json-[^[:space:]]+\.json' | head -1; }
+
+# P1: big prompt + big JSON blob → block; reason names an existing file holding the blob byte-exact
+EXP="$PJD/p1.json"
+in="$(mk 20000 25000 "$PJD" "$EXP")"
+out="$(run_guard "$in")"
+assert_contains P1-block "$out" '"decision":"block"'
+p="$(reason_path "$out")"
+if [ -n "$p" ] && [ -f "$p" ] && cmp -s "$p" "$EXP"; then ok; else bad P1-byteexact "saved blob missing or != prompt blob (p='$p')"; fi
+assert_contains P1-offswitch "$out" "FND_PROMPT_JSON=0"
+
+# P2: big prompt but the JSON blob is below the 8 KB gate → passthrough
+in="$(mk 4000 15000 "$PJD" "$PJD/p2.json")"
+assert_eq P2-blob-below-gate "$(run_guard "$in")" ""
+
+# P3: blob is over the gate but the whole prompt is under the 10 KB gate → passthrough
+in="$(mk 8500 9000 "$PJD" "$PJD/p3.json")"
+assert_eq P3-prompt-below-gate "$(run_guard "$in")" ""
+
+# P4: big prose, no parseable JSON (a stray unbalanced brace) → passthrough
+big="$(printf 'z%.0s' $(seq 1 12000)) and a { broken [ json"
+in="$(jq -n --arg p "$big" --arg c "$PJD" '{prompt:$p,cwd:$c}')"
+assert_eq P4-no-json "$(run_guard "$in")" ""
+
+# P5: FND_PROMPT_JSON gate — 0 means node never spawns; unset means it runs
+run_pj_gate() { : > "$TMP/node.log"; env "$@" NODE_LOG="$TMP/node.log" PATH="$shim:$PATH" \
+  CLAUDE_PLUGIN_ROOT="$fake" bash -c "$PJ_GATE" >/dev/null 2>&1; }
+run_pj_gate FND_PROMPT_JSON=0; ec=$?
+assert_eq P5-off-exit "$ec" 0
+if [ -s "$TMP/node.log" ]; then bad P5-off "node ran with FND_PROMPT_JSON=0"; else ok; fi
+run_pj_gate; ec=$?
+assert_eq P5-default-exit "$ec" 0
+if [ -s "$TMP/node.log" ]; then ok; else bad P5-default "node did not run by default"; fi
+
+# P6: braces / brackets / escaped quotes INSIDE string values must not break extraction
+EXP6="$PJD/p6.json"
+in="$(node -e '
+  const fs=require("fs");
+  const items=Array.from({length:250},(_,i)=>({id:i,s:"has {curly} and [square] and \"quoted\" and \\slash"}));
+  const blob=JSON.stringify({items}); fs.writeFileSync(process.argv[1],blob);
+  process.stdout.write(JSON.stringify({prompt:"Analyze this tricky payload:\n\n"+blob+"\n\nDone.",cwd:process.argv[2]}));
+' "$EXP6" "$PJD")"
+out="$(run_guard "$in")"
+assert_contains P6-block "$out" '"decision":"block"'
+p="$(reason_path "$out")"
+if [ -n "$p" ] && [ -f "$p" ] && cmp -s "$p" "$EXP6"; then ok; else bad P6-byteexact "string-brace blob mis-extracted (p='$p')"; fi
+
+# P7: spill write failure (read-only tmpdir, no workspace) → NEVER block (don't lose the paste)
+if [ "$(id -u)" = 0 ]; then ok; else   # root ignores 000 perms — skip there
+  RO="$TMP/pj-ro"; mkdir -p "$RO"; chmod 000 "$RO"
+  in="$(mk 20000 25000 "$RO/nope" "$PJD/p7.json")"   # cwd under RO → no .claude/fnd, unwritable
+  assert_eq P7-spill-fail-passthrough "$(run_guard "$in" TMPDIR="$RO")" ""
+  chmod 755 "$RO"
+fi
+
+# P8: TWO offloadable blobs (both ≥ gate) → BOTH saved. A block erases the whole prompt,
+# so nothing offloadable may be dropped; the reason lists two paths, each byte-exact.
+EXP8A="$PJD/p8a.json"; EXP8B="$PJD/p8b.json"
+in="$(node -e '
+  const fs=require("fs");
+  const a=JSON.stringify({a:Array.from({length:400},(_,i)=>({id:i,pad:"x".repeat(40)}))});
+  const b=JSON.stringify({b:Array.from({length:600},(_,i)=>({id:i,pad:"y".repeat(40)}))});
+  fs.writeFileSync(process.argv[1],a); fs.writeFileSync(process.argv[2],b);
+  process.stdout.write(JSON.stringify({prompt:"two responses: "+a+" and "+b+" end",cwd:process.argv[3]}));
+' "$EXP8A" "$EXP8B" "$PJD")"
+out="$(run_guard "$in")"
+assert_contains P8-block "$out" '"decision":"block"'
+paths="$(printf '%s' "$out" | jq -r '.reason' 2>/dev/null | grep -oE '/[^[:space:]]+fnd-prompt-json-[^[:space:]]+\.json')"
+n=$(printf '%s\n' "$paths" | grep -c .)
+assert_eq P8-two-paths "$n" 2
+for exp in "$EXP8A" "$EXP8B"; do
+  hit=no; for sp in $paths; do cmp -s "$sp" "$exp" && hit=yes; done
+  if [ "$hit" = yes ]; then ok; else bad "P8-saved-$(basename "$exp")" "blob not saved byte-exact"; fi
+done
+
+# P9: an active task workspace → blob spilled under .claude/fnd/<id>/tmp/, not the tmpdir
+WS="$PJD/ws"; mkdir -p "$WS/.claude/fnd/ELC-999"
+in="$(mk 20000 25000 "$WS" "$PJD/p9.json")"
+out="$(run_guard "$in")"
+p="$(reason_path "$out")"
+assert_contains P9-block "$out" '"decision":"block"'
+case "$p" in *"/.claude/fnd/ELC-999/tmp/"*) ok ;; *) bad P9-workspace "blob not in workspace tmp (p='$p')" ;; esac
+
+# P10: a multibyte JSON blob survives stdin decoding — saved byte-exact, no U+FFFD
+EXP10="$PJD/p10.json"
+in="$(node -e '
+  const fs=require("fs");
+  const items=Array.from({length:500},(_,i)=>({id:i,note:"がぎぐげご漢字テスト日本語",emoji:"🍣🎏🍜"}));
+  const blob=JSON.stringify({items}); fs.writeFileSync(process.argv[1],blob);
+  process.stdout.write(JSON.stringify({prompt:"分析してください:\n\n"+blob+"\n\n以上",cwd:process.argv[2]}));
+' "$EXP10" "$PJD")"
+out="$(run_guard "$in")"
+assert_contains P10-block "$out" '"decision":"block"'
+p="$(reason_path "$out")"
+if [ -n "$p" ] && [ -f "$p" ] && cmp -s "$p" "$EXP10" \
+   && node -e 'const fs=require("fs");process.exit(/�/.test(fs.readFileSync(process.argv[1],"utf8"))?1:0)' "$p"; then ok; else bad P10-multibyte "multibyte blob corrupted (p='$p')"; fi
+
+# P11: a top-level ARRAY blob (not object) over the gate → block
+EXP11="$PJD/p11.json"
+in="$(node -e '
+  const fs=require("fs");
+  const arr=JSON.stringify(Array.from({length:600},(_,i)=>({id:i,pad:"z".repeat(40)})));
+  fs.writeFileSync(process.argv[1],arr);
+  process.stdout.write(JSON.stringify({prompt:"Here is the list:\n\n"+arr+"\n\nsummarize",cwd:process.argv[2]}));
+' "$EXP11" "$PJD")"
+out="$(run_guard "$in")"
+assert_contains P11-array-block "$out" '"decision":"block"'
+p="$(reason_path "$out")"
+if [ -n "$p" ] && [ -f "$p" ] && cmp -s "$p" "$EXP11"; then ok; else bad P11-array "array blob mis-extracted (p='$p')"; fi
+
+# P12: a stray unbalanced brace in prose BEFORE the blob → conservative passthrough (no false block)
+in="$(node -e '
+  const big=JSON.stringify({b:Array.from({length:600},(_,i)=>({id:i,pad:"y".repeat(40)}))});
+  process.stdout.write(JSON.stringify({prompt:"prose with a stray { brace then "+big+" end",cwd:process.argv[1]}));
+' "$PJD")"
+assert_eq P12-conservative-passthrough "$(run_guard "$in")" ""
+
+# P13: malformed stdin → passthrough, exit 0 (never break the prompt)
+out="$(printf 'not json at all' | env TMPDIR="$PJD" node "$GUARD" 2>/dev/null)"; ec=$?
+assert_eq P13-malformed-out "$out" ""
+assert_eq P13-malformed-exit "$ec" 0
+
+# P14: TWO active work-id dirs (ambiguous) → fall back to tmpdir, never an arbitrary ticket dir
+WS2="$PJD/ws2"; mkdir -p "$WS2/.claude/fnd/ELC-999" "$WS2/.claude/fnd/ELC-1000"
+in="$(mk 20000 25000 "$WS2" "$PJD/p14.json")"
+out="$(run_guard "$in")"
+assert_contains P14-block "$out" '"decision":"block"'
+p="$(reason_path "$out")"
+case "$p" in
+  *"/.claude/fnd/"*) bad P14-ambiguous "ambiguous workspaces spilled into a ticket dir (p='$p')" ;;
+  "$PJD"/*)         ok ;;
+  *)                bad P14-ambiguous "unexpected spill path (p='$p')" ;;
+esac
+
+# P15: a balanced-but-INVALID JSON span (unquoted keys) ≥ gate BEFORE a valid blob → the
+# invalid span is skipped (JSON.parse catch), the valid blob still blocks and is saved
+EXP15="$PJD/p15.json"
+in="$(node -e '
+  const fs=require("fs");
+  let bad="{"; for(let i=0;i<1200;i++) bad+="unquotedkey"+i+":"+i+","; bad+="last:1}";  // ~18 KB, invalid
+  const good=JSON.stringify({items:Array.from({length:600},(_,i)=>({id:i,pad:"z".repeat(40)}))});
+  fs.writeFileSync(process.argv[1],good);
+  process.stdout.write(JSON.stringify({prompt:"invalid "+bad+" then valid "+good+" end",cwd:process.argv[2]}));
+' "$EXP15" "$PJD")"
+out="$(run_guard "$in")"
+assert_contains P15-block "$out" '"decision":"block"'
+p="$(reason_path "$out")"
+if [ -n "$p" ] && [ -f "$p" ] && cmp -s "$p" "$EXP15"; then ok; else bad P15-skip-invalid "valid blob after an invalid span not saved (p='$p')"; fi
+
+# P16: a stray closer '}' at depth 0 in prose before a FLAT-array blob → the depth-0
+# stray-closer guard keeps the scan armed so the array is still extracted and blocked
+EXP16="$PJD/p16.json"
+in="$(node -e '
+  const fs=require("fs");
+  const arr=JSON.stringify(Array.from({length:600},(_,i)=>({id:i,pad:"z".repeat(40)})));
+  fs.writeFileSync(process.argv[1],arr);
+  process.stdout.write(JSON.stringify({prompt:"result } was "+arr+" end",cwd:process.argv[2]}));
+' "$EXP16" "$PJD")"
+out="$(run_guard "$in")"
+assert_contains P16-block "$out" '"decision":"block"'
+p="$(reason_path "$out")"
+if [ -n "$p" ] && [ -f "$p" ] && cmp -s "$p" "$EXP16"; then ok; else bad P16-stray-closer "flat array after a stray closer not blocked/saved (p='$p')"; fi
+
+# ═══ T — SubagentStart subagent-conventions (code-convention injection) ══════
+# Reuses $fake (CLAUDE_PLUGIN_ROOT with hooks/comment-discipline.md + lean-code.md
+# holding MARK-… sentinels) from the S scaffolding.
+SUBC="$ROOT/plugins/fnd/hooks/subagent-conventions.sh"
+run_subc() { printf '%s' "$1" | env CLAUDE_PLUGIN_ROOT="$fake" "${@:2}" bash "$SUBC" 2>/dev/null; }
+
+# T1: a code-writing agent gets both conventions
+out="$(run_subc '{"agent_type":"general-purpose"}')"
+assert_contains T1-comment "$out" "MARK-comment-discipline"
+assert_contains T1-lean    "$out" "MARK-lean-code"
+
+# T2: unknown / unparsable type errs toward injecting (a code agent without them is the costly miss)
+assert_contains T2-unknown   "$(run_subc '{"agent_type":"some-new-writer"}')" "MARK-comment-discipline"
+assert_contains T2-malformed "$(run_subc 'not json')"                          "MARK-comment-discipline"
+
+# T3: non-code agents are skipped (no conventions) — jira-writer joins the readers/reviewers
+for a in jira-reader jira-writer bug-hunter change-reviewer figma-reader theme-explorer; do
+  assert_eq "T3-$a-skip" "$(run_subc "{\"agent_type\":\"$a\"}")" ""
+done
+# a scoped plugin agent_type (e.g. fnd:jira-writer) is still matched by the *…* globs
+assert_eq T4-scoped-writer-skip "$(run_subc '{"agent_type":"fnd:jira-writer"}')" ""
+
+# T5: FND_LEAN=0 drops lean-code, keeps comment-discipline
+out="$(run_subc '{"agent_type":"general-purpose"}' FND_LEAN=0)"
+assert_contains T5-comment "$out" "MARK-comment-discipline"
+assert_absent   T5-no-lean "$out" "MARK-lean-code"
+
+# T6: the hook always exits 0 (a hook failure must never block an agent start)
+run_subc '{"agent_type":"jira-writer"}'    >/dev/null 2>&1; assert_eq T6-skip-exit   "$?" 0
+run_subc '{"agent_type":"general-purpose"}' >/dev/null 2>&1; assert_eq T6-inject-exit "$?" 0
 
 echo "hooks sim: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then

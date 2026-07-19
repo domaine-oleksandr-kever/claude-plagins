@@ -25,6 +25,7 @@ in its own subfolder under `plugins/`:
 │       │   ├── change-reviewer.md   #  reviews a diff (hygiene + conformance)
 │       │   ├── bug-hunter.md        #  adversarial bug hunt on a diff (correctness)
 │       │   ├── jira-reader.md       #  reads a ticket → structured fields
+│       │   ├── jira-writer.md       #  writes one approved field/comment (ADF) → Jira
 │       │   ├── figma-reader.md      #  reads one Figma frame → build spec
 │       │   └── theme-explorer.md    #  scouts the theme → impact map
 │       ├── hooks/                # injected conventions + git guards + context monitor
@@ -236,6 +237,10 @@ heavy/noisy work out of the main context:
   backstop, and alongside live QA in the ship pipeline.
 - **`jira-reader`** — fetches a Jira ticket via the Atlassian MCP and returns clean
   structured fields (keeps raw ADF out of context).
+- **`jira-writer`** — the write-side mirror: converts one **approved** markdown value to
+  ADF and makes the single `editJiraIssue`/`addCommentToJiraIssue` call, so the large ADF
+  blob stays in its disposable context, not the main loop. Writer skills delegate here
+  **after** the ✋ approval (the gate stays in the skill; the agent never authorizes).
 - **`figma-reader`** — reads **one** Figma frame via the Figma Dev Mode MCP and returns a
   compact build spec. Spawned **one per URL, in parallel** when a ticket has several.
 - **`theme-explorer`** — a planning scout: reads the project's `.claude/rules` + theme
@@ -362,11 +367,17 @@ hook error never blocks work:
   `GIT_CONFIG_*` redirects; its FP/FN contract lives in
   `tests/no-verify-bypass-matrix.sh`). `no-ai-attribution.sh` blocks AI-attribution
   trailers in commit messages.
-- **UserPromptSubmit** — `context-stats.cjs` monitors context-window usage and warns
-  (recommending `/compact`) past a threshold. Knobs, set like `FND_LEAN` in
-  `settings.json` → `env`: `FND_CTX_MONITOR=0` turns it off, `FND_CTX_WARN` sets the
-  warn threshold in % (default 40), `FND_CTX_WINDOW` overrides the assumed window size
-  (e.g. for 1M-token sessions).
+- **UserPromptSubmit** — two independent hooks. `context-stats.cjs` monitors
+  context-window usage and warns (recommending `/compact`) past a threshold. Knobs, set
+  like `FND_LEAN` in `settings.json` → `env`: `FND_CTX_MONITOR=0` turns it off,
+  `FND_CTX_WARN` sets the warn threshold in % (default 40), `FND_CTX_WINDOW` overrides the
+  assumed window size (e.g. for 1M-token sessions). `prompt-json-guard.cjs` keeps a large
+  pasted JSON blob out of the conversation: a prompt over ~10 KB that carries a parseable
+  JSON blob over ~8 KB is **blocked** (the prompt is erased, never reaching the model), the
+  blob is spilled to a file (the active task workspace `tmp/`, else a private temp file),
+  and the developer is shown that path to resubmit against — so the JSON is read with
+  jq/Read on demand instead of sitting in context every turn. `FND_PROMPT_JSON=0` disables
+  it.
 
 ### Environment switches
 
@@ -384,6 +395,7 @@ added to this table.
 | `FND_CTX_WINDOW` | auto | override the assumed context window size (tokens) |
 | `FND_MCP_SLIM` | `1` | `0` disables the MCP result compressor (PostToolUse `mcp-slim` hook) — node never spawns |
 | `FND_MCP_SLIM_DIR` | `os.tmpdir()` | directory where `json-slim` and the `mcp-slim` hook spill offloaded rows / the original result (the `full=<path>` handle) |
+| `FND_PROMPT_JSON` | `1` | `0` disables the prompt-JSON guard (UserPromptSubmit `prompt-json-guard` hook) — node never spawns |
 | `SHOPIFY_ADMIN_GQL_QUIET` | off | non-`0` value shortens the gql runner's engine-fallback note to `note=engine=token` |
 
 ## Lean-code convention
@@ -411,11 +423,12 @@ Two deliberate decisions, recorded so they don't read as omissions:
   flow instead of a frozen allowlist — a frozen list that misses one instructed tool blocks
   the skill's own workflow. The narrow utility skills (translations,
   breaking-changes, preview themes, commit, a11y fixes) do declare tight allowlists.
-- **The reader agents ship without a `tools:` restriction.** `jira-reader` / `figma-reader`
-  must work whether the Atlassian/Figma MCP comes from this plugin or from the user's own
-  config (the MCP tool names differ per install scope), so they inherit the full toolset and
-  enforce read-only behaviour in their prompts instead. A wrong hardcoded MCP tool name would
-  break them silently.
+- **The Jira/Figma agents ship without a `tools:` restriction.** `jira-reader`,
+  `jira-writer`, and `figma-reader` must work whether the Atlassian/Figma MCP comes from this
+  plugin or from the user's own config (the MCP tool names differ per install scope), so they
+  inherit the full toolset and enforce their contract in the prompt instead — `jira-reader` /
+  `figma-reader` stay read-only, `jira-writer` makes exactly one approved write and nothing
+  else. A wrong hardcoded MCP tool name would break them silently.
 
 ## Reporting plugin issues
 

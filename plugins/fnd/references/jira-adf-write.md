@@ -9,7 +9,34 @@ sent to a rich-text field is rejected or stored literally. This applies to every
 that writes back: `write-technical-approach` (Technical Approach), `write-steps-to-test`
 (Steps to test), and any `qa-feature-or-fix` write.
 
-## Use the converter — don't hand-build ADF
+## Preferred path from the main loop — delegate to the `jira-writer` subagent
+
+A converted field/comment is a large ADF blob (~3.4k tokens for a real Technical
+Approach). Running the converter and typing that object into an `editJiraIssue` call
+**inline** pays for it twice in the main-loop context — the converter's stdout copy and
+the model-typed argument copy — and leaves it in history forever. So from a main-loop
+skill, **after the ✋ approval**, delegate the write to the **`jira-writer`** subagent
+instead: it converts and writes inside its own disposable context, and the ADF never
+touches the main loop.
+
+Brief (one writer per field; parallel writers for several fields):
+
+> **jira-writer** — ticket `<KEY>` · target `<customfield_id>` (or `comment`) · source
+> `<path to the approved .md>`. (Add `tables: keep` only if tables must be preserved.)
+
+It returns one line: `ok: <KEY> <target> written (<n> bytes ADF)` or `error: <reason>`.
+The approval gate stays in the calling skill — `jira-writer` only inflates and writes, it
+never authorizes or decides content. Resolve the field id yourself (`jira-field-ids.md`)
+and pass it in; a manual-update path (developer edits Jira) needs no writer at all.
+
+One case keeps the write **inline** (no `jira-writer` spawn): you are **already inside a
+subagent** (subagents can't nest — the ADF is already off the main loop, so convert and
+write directly with the mechanics below). A **manual** update is different again: the
+developer edits Jira themselves, so no converter runs and no writer is spawned at all.
+
+## The mechanics — use the converter, don't hand-build ADF
+
+`jira-writer` runs exactly this; it is also the inline / manual recipe.
 
 ```bash
 node ${CLAUDE_PLUGIN_ROOT}/scripts/md-to-adf.cjs --no-tables <approved.md>   # or pipe via stdin

@@ -21,7 +21,7 @@ Operating mode: **Phase 1 in plan mode** (ingest ticket + implementation context
 
 ## Global rules
 
-- Read the ticket via the **`jira-reader` subagent** (Atlassian MCP) — AC, TA, links, attachments; the optional write-back (Phase 2) stays in the main loop.
+- Read the ticket via the **`jira-reader` subagent** (Atlassian MCP) — AC, TA, links, attachments; the optional write-back is **delegated to the `jira-writer` subagent** (the ✋ approval stays in the main loop).
 - **Never proceed past the ✋ checkpoint** without explicit developer confirmation.
 
 ---
@@ -46,7 +46,7 @@ Operating mode: **Phase 1 in plan mode** (ingest ticket + implementation context
 
 Present the Steps to Test. Encourage the developer to **walk through** them (mentally or on preview) to catch gaps. Once approved, save them to the workspace `steps-to-test.md` (`${CLAUDE_PLUGIN_ROOT}/references/task-workspace.md`) before the Jira write-back.
 
-2. **Update Jira** (only after approval) — ask **manual update** vs **Atlassian MCP**. Place content in the **Steps to Test** custom field per process — not only comments. The field is rich-text (ADF): write the approved markdown to a temp file, run `node ${CLAUDE_PLUGIN_ROOT}/scripts/md-to-adf.cjs --no-tables <that-file>`, then `editJiraIssue` with `fields: { "<Steps to test field id>": <the ADF JSON> }`. Conversion rules: **`${CLAUDE_PLUGIN_ROOT}/references/jira-adf-write.md`**.
+2. **Update Jira** (only after approval) — ask **manual update** vs **Atlassian MCP**. Place content in the **Steps to Test** custom field per process — not only comments. For the **MCP** path: resolve the Steps-to-test field id (`jira-field-ids.md`) and **delegate the write to the `jira-writer` subagent** (ticket · that field id · the saved `steps-to-test.md`) — the field is rich-text (ADF), and delegating keeps the large ADF blob out of the main context. Mechanics + when to write inline instead: **`${CLAUDE_PLUGIN_ROOT}/references/jira-adf-write.md`**.
 
 ## Quality bar
 

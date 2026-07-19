@@ -17,11 +17,13 @@ if command -v jq >/dev/null 2>&1; then
   agent_type="$(printf '%s' "$input" | jq -r '.agent_type // empty' 2>/dev/null || true)"
 fi
 
-# Read-only agents don't write code — skip them (they are also the most
-# frequent spawns). An unknown or unparsable type gets the conventions:
-# over-injecting is cheap, a code-writing agent without them is not.
+# Agents that don't write code — skip them (they are also the most frequent
+# spawns). The readers/reviewers are read-only; jira-writer writes to Jira, not
+# code, so the code conventions don't apply to it either. An unknown or
+# unparsable type gets the conventions: over-injecting is cheap, a code-writing
+# agent without them is not.
 case "$agent_type" in
-  *jira-reader*|*figma-reader*|*theme-explorer*|*change-reviewer*|*bug-hunter*|Explore|Plan|claude-code-guide|statusline-setup)
+  *jira-reader*|*jira-writer*|*figma-reader*|*theme-explorer*|*change-reviewer*|*bug-hunter*|Explore|Plan|claude-code-guide|statusline-setup)
     exit 0 ;;
 esac
 

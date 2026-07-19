@@ -286,11 +286,14 @@ row, and relays any `ESCALATE` via AskUserQuestion → appends the answer to `pi
    policy** — on both exits (bot rounds done AND timebox expiry): `draft` →
    `gh pr ready --undo <pr>` flips the now-reviewed PR to draft (log to `notes.md`);
    `ready` → leave as-is.
-7. **jira-hand-off** — inline (glue: one conversion + one MCP call; no subagent, so no
-   model to pin). Policy allows → one ticket comment: a **clickable PR link** + the
-   distilled judgment calls from `notes.md` (accepted edge cases, anything not
-   implemented and why, open questions), converted via `md-to-adf.cjs --no-tables` →
-   `addCommentToJiraIssue`; policy forbids → print the comment for manual paste.
+7. **jira-hand-off** — inline in the conductor (no phase subagent, so no model to pin), but
+   delegate its one Jira write to the `jira-writer` subagent so the comment's ADF blob
+   never lands in the conductor context. Policy allows → write the approved
+   comment to a temp file (a **clickable PR link** + the distilled judgment calls from
+   `notes.md`: accepted edge cases, anything not implemented and why, open questions),
+   then spawn `jira-writer` (ticket · `comment` · that file) for the one
+   `addCommentToJiraIssue` write (`${CLAUDE_PLUGIN_ROOT}/references/jira-adf-write.md`);
+   policy forbids → print the comment for manual paste.
 
 ## Final report
 

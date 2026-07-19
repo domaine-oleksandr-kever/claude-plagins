@@ -26,7 +26,7 @@ Operating mode: **Phase 1 in plan mode** (analysis, outline); leave plan mode on
 
 - The developer owns Git, merges, and ticket updates; you assist.
 - **Never proceed past a ✋ checkpoint** without explicit developer confirmation.
-- Use **Atlassian MCP** for Jira: **reads are delegated to the `jira-reader` subagent**; the optional write-back (Phase 2) stays in the main loop.
+- Use **Atlassian MCP** for Jira: **reads are delegated to the `jira-reader` subagent**, and the optional Phase 2 write-back is **delegated to the `jira-writer` subagent** (the ✋ approval stays in the main loop).
 - Respect Foundation conventions: follow the repo's coding rules and **extend — never directly modify** `src/entry/core/*`.
 - **Client-facing repo.** Never reference tickets, repos, or Figma files from other client accounts.
 - **No internal repo file links** in the TA — they render as plain text in Jira. Reference in-repo files/rules with **inline code** only (`` `sections/main-header.liquid` ``). External links (Jira, Figma, public Shopify/Domaine docs) are fine.
@@ -61,7 +61,7 @@ Present the **outline and open questions**. Wait for approval or edits before Ph
 
 Present the draft path and summary (with any deep-research findings folded in). The developer must **read, edit, and approve** before any Jira update.
 
-3. **Update Jira** (only after approval) — ask whether **(a)** the developer updates manually or **(b)** you use Atlassian MCP. Put the approved TA in the **Technical Approach** custom field, not only description/comments. The field is rich-text (ADF): `node ${CLAUDE_PLUGIN_ROOT}/scripts/md-to-adf.cjs --no-tables docs/technical-approaches/<TICKET-KEY>-technical-approach.md`, then `editJiraIssue` with `fields: { "<TA field id>": <the ADF JSON> }`. Conversion rules: **`${CLAUDE_PLUGIN_ROOT}/references/jira-adf-write.md`**.
+3. **Update Jira** (only after approval) — ask whether **(a)** the developer updates manually or **(b)** you use Atlassian MCP. Put the approved TA in the **Technical Approach** custom field, not only description/comments. For **(b)**: resolve the TA field id (`jira-field-ids.md`) and **delegate the write to the `jira-writer` subagent** (ticket · that field id · the approved `docs/technical-approaches/<TICKET-KEY>-technical-approach.md`) — the field is rich-text (ADF), and delegating keeps the large ADF blob out of the main context. Mechanics + when to write inline instead: **`${CLAUDE_PLUGIN_ROOT}/references/jira-adf-write.md`**.
 
 ## Quality bar
 
