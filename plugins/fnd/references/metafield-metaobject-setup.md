@@ -99,12 +99,17 @@ the repo's **gitignored `.env`** as **`SHOPIFY_ADMIN_TOKEN=shpat_…`** (alongsi
 Either way, run everything through the runner:
 
 ```bash
-${CLAUDE_PLUGIN_ROOT}/scripts/shopify-admin-gql.sh --query .claude/fnd/<work-id>/tmp/inspection.graphql [--operation <Name>]
+${CLAUDE_PLUGIN_ROOT}/scripts/shopify-admin-gql.sh --query .claude/fnd/<work-id>/tmp/inspection.graphql \
+  [--operation <Name>] --out .claude/fnd/<work-id>/tmp/inspection.json   # then pull fields with jq
 ```
 
 It tries `store execute` first (CLI ≥ 4.x), falls back to the token, takes the store domain from
-`shopify.theme.toml`'s `store=` line, keeps every credential out of context, and prints only the
-JSON response. Both engines return the **same envelope** — `{"data":…}` on success, `{"errors":…}`
+`shopify.theme.toml`'s `store=` line, and keeps every credential out of context. **Inspection
+reads (STEP 0, whole products) run 20–100 KB — always pass `--out` targeting the task
+workspace `tmp/` (mktemp when no workspace exists) and pull what you need with `jq`**; the
+runner then prints only `ok=1 bytes=… out=… errors=<none|first-error head>` — check `errors=`
+before trusting the file. **Mutations stay inline** (small responses; the flow checks
+`userErrors` immediately). Both engines return the **same envelope** — `{"data":…}` on success, `{"errors":…}`
 on a GraphQL failure (exit 0, mirroring the Admin API's HTTP 200 + errors) — the runner
 wraps/unboxes `store execute`'s native output so responses read identically either way, and a
 GraphQL error never triggers the token fallback — and for a **mutation**, no failure after an

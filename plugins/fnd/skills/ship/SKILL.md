@@ -112,7 +112,8 @@ definitions AND actual values, selling plan groups
 (subscriptions), bundle configuration, target products/collections/pages, template
 assignments, app-owned records. Probe each with read-only queries via
 `${CLAUDE_PLUGIN_ROOT}/scripts/shopify-admin-gql.sh` — targeted queries, not a full
-catalog scan — and write the map to `notes.md` as `store-data:` entries: requirement →
+catalog scan; anything big goes through `--out` into the workspace `tmp/` + `jq` — and
+write the map to `notes.md` as `store-data:` entries: requirement →
 **present** (+ the concrete product/entity handle that carries it — that's the QA
 target), **definition-only** (schema exists, no values), or **missing**. No/partial
 admin access → audit what you still can (theme code, `theme-json.sh` state, public

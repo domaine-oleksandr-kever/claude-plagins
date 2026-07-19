@@ -45,9 +45,14 @@
 # WITHOUT it (raw bytes restore byte-exact); strip only the working base you'll edit.
 #
 # Output: `themes` prints one {"id","name","role"} JSON per line (gid + UPPERCASE role on every
-# engine); `get` prints the raw file body (--out preserves exact bytes); `set` prints a one-line
-# result incl. the engine used. GraphQL errors surface as the {"errors":…} envelope on stdout
-# with exit 5 (plus a scope hint when it looks like a missing read_themes/write_themes grant).
+# engine); `get` prints the raw file body (--out preserves exact bytes) — an inline body over
+# 8 KB to any non-TTY (pipes and `>` redirects alike) is suppressed as a self-describing
+# `note=large_file … NOT the file content` line (a settings_data.json is 30–150 KB of context
+# burn; a human terminal still prints in full; a redirect-snapshot of the note fails `set`'s
+# json validation before any upload — real snapshots use --out); `set` prints a
+# one-line result incl. the engine used. GraphQL errors print the {"errors":…} head on stdout
+# (partial data stripped) with exit 5 and the FULL envelope at a `log=<path>` mktemp (plus a
+# scope hint when it looks like a missing read_themes/write_themes grant).
 # Exit: 0 ok · 2 usage · 4 live-theme write refused · 5 GraphQL/user/CLI errors · 3 no engine
 # credentials at all (hints name every remedy).
 set -euo pipefail
@@ -129,7 +134,19 @@ emit_file() {
       || { echo "error=out_write_failed out=$OUT (no snapshot written — do NOT proceed to mutate)" >&2; exit 5; }
     echo "ok=saved file=$FILE out=$OUT bytes=$(wc -c < "$OUT" | tr -d ' ')" >&2
   else
-    filter "$1"; echo
+    local body bytes
+    body="$(mktemp)"; CLEAN+=("$body")
+    filter "$1" > "$body"
+    bytes="$(wc -c < "$body" | tr -d ' ')"
+    # every non-TTY caller is suppressed — pipes AND file redirects: the model's Bash
+    # harness captures via a file redirect, indistinguishable from `> snap.json`, so the
+    # note is self-describing and a later `set --from <note-file>` fails json validation
+    # before any upload (fail-closed). Real snapshots go through --out (byte-exact).
+    if [ "$bytes" -gt 8192 ] && [ ! -t 1 ]; then
+      echo "note=large_file bytes=$bytes file=$FILE — body suppressed, this line is NOT the file content; re-run with --out <path> and pull what you need with jq"
+      return 0
+    fi
+    cat "$body"; echo
   fi
 }
 
@@ -163,20 +180,32 @@ gql() {
     exit "$rc"
   fi
   printf '%s' "$RESP" | jq empty >/dev/null 2>&1 || {
-    echo "error=non_json_response" >&2; printf '%s\n' "$RESP"; exit 5; }
+    local lf; lf="$(mktemp)"; printf '%s\n' "$RESP" > "$lf"
+    echo "error=non_json_response log=$lf" >&2
+    head -c 600 "$lf" >&2; echo >&2
+    exit 5; }
   if [ "$(printf '%s' "$RESP" | jq 'has("errors")')" = "true" ]; then
     if printf '%s' "$RESP" | grep -qi 'ACCESS_DENIED\|access denied'; then
       if [ "$ENGINE" = "auto" ] && cli_token_ready; then
         GQL_NOTE="admin credential lacks read_themes/write_themes"
         return 1
       fi
-      printf '%s\n' "$RESP"
+      gql_err_report
       echo "hint=the credential lacks read_themes/write_themes — re-run \`shopify store auth --store <domain> --scopes <existing>,read_themes,write_themes\`, extend the custom app's scopes, or use --engine themecli (Theme Access token)" >&2
       exit 5
     fi
-    printf '%s\n' "$RESP"
+    gql_err_report
     exit 5
   fi
+}
+
+# an error envelope's partial `data` can drag a whole theme file along — print only the
+# errors object (head-capped); the full envelope stays readable at log= (mktemp, NOT in
+# CLEAN — it must survive exit)
+gql_err_report() {
+  local lf; lf="$(mktemp)"; printf '%s\n' "$RESP" > "$lf"
+  printf '%s' "$RESP" | jq -c '{errors}' 2>/dev/null | head -c 600; echo
+  echo "error=gql_errors log=$lf (full envelope at log=)" >&2
 }
 
 # role filter applied inside each engine fn so `themes` streams straight to stdout (no capture);
@@ -229,7 +258,8 @@ gql_set() {
   }' "$(jq -n --arg id "$gid" --arg f "$FILE" --rawfile body "$FROM" \
         '{id: $id, files: [{filename: $f, body: {type: "TEXT", value: $body}}]}')" || return 1
   ue="$(printf '%s' "$RESP" | jq -c '.data.themeFilesUpsert.userErrors // []')"
-  [ "$ue" = "[]" ] || { printf '%s\n' "$RESP"; echo "error=upsert_user_errors $ue" >&2; exit 5; }
+  [ "$ue" = "[]" ] || { local lf; lf="$(mktemp)"; printf '%s\n' "$RESP" > "$lf"
+    echo "error=upsert_user_errors $(printf '%s' "$ue" | head -c 600) log=$lf" >&2; exit 5; }
   jq -nc --arg name "$name" --arg role "$role" --arg f "$FILE" \
     '{ok: "upserted", engine: "gql", theme: $name, role: $role, files: [$f]}'
 }

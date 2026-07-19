@@ -15,8 +15,15 @@ including the live one (reading live is safe). Don't guess what's configured on 
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/scripts/theme-json.sh themes                       # id / name / role
-${CLAUDE_PLUGIN_ROOT}/scripts/theme-json.sh get --theme <id> --file templates/product.json
+${CLAUDE_PLUGIN_ROOT}/scripts/theme-json.sh get --theme <id> --file templates/product.json \
+  --strip-comments --out .claude/fnd/<work-id>/tmp/product.json          # then pull values with jq
 ```
+
+Inspection reads go through `--out` (target the task workspace `tmp/`, mktemp when no
+workspace) — a `settings_data.json` is 30–150 KB of context burn inline. `get` without
+`--out` suppresses any body over 8 KB to a **non-TTY** caller (pipes and `>` redirects
+alike) with a self-describing `note=large_file` line — never redirect a big `get` to make
+a snapshot; `--out` is the snapshot path (byte-exact). A human terminal prints in full.
 
 Writes (`set`) follow the protocol below. General Admin GraphQL (products, metafields,
 metaobjects, files) goes through `${CLAUDE_PLUGIN_ROOT}/scripts/shopify-admin-gql.sh` — see

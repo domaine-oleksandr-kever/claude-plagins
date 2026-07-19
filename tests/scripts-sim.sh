@@ -41,6 +41,9 @@ set -u
 case "${FAKE_RUNNER_MODE:-ok}" in
   mutfail) echo "error=store_execute_failed_mutation (stub)" >&2; exit 3 ;;
   nocreds) echo "error=no_admin_token" >&2; exit 3 ;;
+  errenv)  big=$(printf 'p%.0s' $(seq 1 9000))
+           printf '{"errors":[{"message":"boom"}],"data":{"theme":{"pad":"%s"}}}\n' "$big"; exit 0 ;;
+  notjson) echo "<<<not json>>>"; exit 0 ;;
 esac
 Q=""
 while [ $# -gt 0 ]; do case "$1" in --query) Q="$2"; shift 2 ;; *) shift ;; esac; done
@@ -48,11 +51,20 @@ role="${FAKE_ROLE:-DEVELOPMENT}"
 if grep -q FndThemesList "$Q"; then
   printf '{"data":{"themes":{"nodes":[{"id":"gid://shopify/OnlineStoreTheme/1","name":"Live","role":"MAIN"},{"id":"gid://shopify/OnlineStoreTheme/2","name":"Dev","role":"DEVELOPMENT"}]}}}\n'
 elif grep -q FndThemeFileGet "$Q"; then
-  printf '{"data":{"theme":{"id":"gid://shopify/OnlineStoreTheme/2","name":"Dev","role":"%s","files":{"nodes":[{"filename":"templates/product.json","updatedAt":"now","body":{"content":"{\\"a\\":1}"}}],"userErrors":[]}}}}\n' "$role"
+  if [ -n "${FAKE_BIG:-}" ]; then
+    big=$(printf 'x%.0s' $(seq 1 9000))
+    printf '{"data":{"theme":{"id":"gid://shopify/OnlineStoreTheme/2","name":"Dev","role":"%s","files":{"nodes":[{"filename":"templates/product.json","updatedAt":"now","body":{"content":"%s"}}],"userErrors":[]}}}}\n' "$role" "$big"
+  else
+    printf '{"data":{"theme":{"id":"gid://shopify/OnlineStoreTheme/2","name":"Dev","role":"%s","files":{"nodes":[{"filename":"templates/product.json","updatedAt":"now","body":{"content":"{\\"a\\":1}"}}],"userErrors":[]}}}}\n' "$role"
+  fi
 elif grep -q FndThemeMeta "$Q"; then
   printf '{"data":{"theme":{"id":"gid://shopify/OnlineStoreTheme/2","name":"Dev","role":"%s"}}}\n' "$role"
 elif grep -q FndThemeFileSet "$Q"; then
-  printf '{"data":{"themeFilesUpsert":{"upsertedThemeFiles":[{"filename":"templates/product.json"}],"userErrors":[]}}}\n'
+  if [ -n "${FAKE_UE:-}" ]; then
+    printf '{"data":{"themeFilesUpsert":{"upsertedThemeFiles":[],"userErrors":[{"field":["files"],"message":"nope","code":"ERROR"}]}}}\n'
+  else
+    printf '{"data":{"themeFilesUpsert":{"upsertedThemeFiles":[{"filename":"templates/product.json"}],"userErrors":[]}}}\n'
+  fi
 else
   echo "error=stub_unknown_query" >&2; exit 5
 fi
@@ -123,6 +135,50 @@ rc=0; M10="$TMP/tj10"; TJ_CLI_MARKER="$M10" FAKE_RUNNER_MODE=nocreds SHOPIFY_CLI
   PATH="$TJSHIM:$PATH" "$BASH_BIN" "$TJDIR/theme-json.sh" set --theme 2 --file templates/product.json \
   --from "$TMP/snap.json" --store test.myshopify.com >"$O" 2>"$E" || rc=$?
 if [ "$rc" -eq 0 ] && [ -f "$M10" ] && grep -q themecli "$O"; then ok; else bad T10-nocreds-fallback "rc=$rc out=$(cat "$O") err=$(head -c 150 "$E" | tr '\n' ' ')"; fi
+
+# T11 (2026-07 token audit): a small inline get still prints the body verbatim
+rc=0; "$BASH_BIN" "$TJDIR/theme-json.sh" get --theme 2 --file templates/product.json >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && [ "$(head -1 "$O")" = '{"a":1}' ]; then ok; else bad T11-small-inline "rc=$rc out=$(head -c 100 "$O")"; fi
+
+# T12: an inline body over 8 KB is suppressed when CAPTURED (command substitution = pipe)
+rc=0; outv="$(FAKE_BIG=1 "$BASH_BIN" "$TJDIR/theme-json.sh" get --theme 2 --file templates/product.json 2>"$E")" || rc=$?
+if [ "$rc" -eq 0 ] && printf '%s' "$outv" | grep -q 'note=large_file' \
+   && ! printf '%s' "$outv" | grep -q 'xxxxxxxx'; then ok
+else bad T12-large-suppressed "rc=$rc out=$(printf '%s' "$outv" | head -c 120)"; fi
+
+# T12b: an improvised `get > snap.json` of a large file is FAIL-CLOSED — the captured
+# note is self-describing and not valid JSON, so a later `set --from` refuses it before
+# any upload (real snapshots use --out)
+rc=0; FAKE_BIG=1 "$BASH_BIN" "$TJDIR/theme-json.sh" get --theme 2 --file templates/product.json >"$TMP/redir.json" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q 'NOT the file content' "$TMP/redir.json" \
+   && ! jq empty "$TMP/redir.json" >/dev/null 2>&1; then ok
+else bad T12b-redirect-failclosed "rc=$rc head=$(head -c 100 "$TMP/redir.json" 2>/dev/null)"; fi
+rc=0; "$BASH_BIN" "$TJDIR/theme-json.sh" set --theme 2 --file templates/product.json \
+  --from "$TMP/redir.json" >"$O" 2>"$E" || rc=$?
+assert T12c-note-restore-refused 2 "$rc" "$E" "error=from_file_invalid_json"
+
+# T13: the same large body with --out saves the full bytes (no suppression on that path)
+rc=0; FAKE_BIG=1 "$BASH_BIN" "$TJDIR/theme-json.sh" get --theme 2 --file templates/product.json \
+  --out "$TMP/big.json" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && [ "$(wc -c < "$TMP/big.json" | tr -d ' ')" -ge 9000 ]; then ok; else bad T13-large-out "rc=$rc bytes=$(wc -c < "$TMP/big.json" 2>/dev/null)"; fi
+
+# T14: a GraphQL error envelope prints the errors head only — partial data stays at log=
+rc=0; FAKE_RUNNER_MODE=errenv "$BASH_BIN" "$TJDIR/theme-json.sh" themes >"$O" 2>"$E" || rc=$?
+assert T14-errenv-exit 5 "$rc" "$E" "error=gql_errors"
+if grep -q '"errors"' "$O" && ! grep -q 'pppppppp' "$O"; then ok; else bad T14b-data-stripped "out=$(head -c 150 "$O")"; fi
+lf="$(grep -o 'log=/[^ ]*' "$E" | head -1 | cut -d= -f2)"
+if [ -n "$lf" ] && grep -q 'pppppppp' "$lf"; then ok; else bad T14c-log-full "log=$lf missing the full envelope"; fi
+
+# T15: upsert userErrors — the parsed errors + log= replace the full envelope on stdout
+rc=0; FAKE_UE=1 "$BASH_BIN" "$TJDIR/theme-json.sh" set --theme 2 --file templates/product.json \
+  --from "$TMP/snap.json" >"$O" 2>"$E" || rc=$?
+assert T15-ue-exit 5 "$rc" "$E" "error=upsert_user_errors"
+if [ ! -s "$O" ] && grep -q 'log=' "$E"; then ok; else bad T15b-stdout-clean "out=$(head -c 120 "$O")"; fi
+
+# T16: a non-JSON runner response is truncated to a 600-byte head + log=
+rc=0; FAKE_RUNNER_MODE=notjson "$BASH_BIN" "$TJDIR/theme-json.sh" themes >"$O" 2>"$E" || rc=$?
+assert T16-notjson-exit 5 "$rc" "$E" "error=non_json_response"
+if grep -q 'log=' "$E" && [ ! -s "$O" ]; then ok; else bad T16b-log-and-clean-stdout "out=$(head -c 100 "$O")"; fi
 
 # ------------------------------------- shopify-admin-gql.sh against PATH shims --
 SHIM="$TMP/shim"; mkdir -p "$SHIM"
@@ -195,6 +251,53 @@ if [ "$rc" -eq 0 ] && grep -q '"variables":{"k":"v"}' "$M.body"; then ok; else b
 # G6: --variables and --variables-file together are refused
 rc=0; run_gql --query query.graphql --variables '{}' --variables-file vars.json >"$O" 2>"$E" || rc=$?
 assert G6-conflicting-flags 2 "$rc" "$E" "error=conflicting_flags"
+
+# ---- 2026-07 token audit: --out summary + fallback-note quieting ----
+
+# G7: --out swaps the envelope for a summary line; the file holds the envelope
+rc=0; run_gql --engine token --query query.graphql --out "$TMP/env7.json" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^ok=1 bytes=[0-9]* out=.*errors=none' "$O" \
+   && ! grep -q '"data"' "$O" && grep -q '"data"' "$TMP/env7.json"; then ok
+else bad G7-out-summary "rc=$rc out=$(cat "$O")"; fi
+
+# G8: a GraphQL-errors envelope under --out carries the first error's head in the summary
+rc=0; FAKE_HTTP_BODY='{"errors":[{"message":"Field xyz is missing on Shop"}]}' \
+  run_gql --engine token --query query.graphql --out "$TMP/env8.json" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q 'errors=Field xyz is missing' "$O"; then ok
+else bad G8-out-errors-head "rc=$rc out=$(cat "$O")"; fi
+
+# G9: an unwritable --out path is a hard stop, not a silent success
+rc=0; run_gql --engine token --query query.graphql --out "$TMP/no/such/dir/x.json" >"$O" 2>"$E" || rc=$?
+assert G9-out-write-failed 5 "$rc" "$E" "error=out_write_failed"
+
+# G10: the store engine's wrapped envelope also lands in --out
+rc=0; FAKE_EXEC_MODE=ok run_gql --query query.graphql --out "$TMP/env10.json" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^ok=1 ' "$O" && grep -q '"data":{"ok":true}' "$TMP/env10.json"; then ok
+else bad G10-store-out "rc=$rc out=$(cat "$O") file=$(cat "$TMP/env10.json" 2>/dev/null)"; fi
+
+# G11: the fallback note prints in full once per store, then shortens to note=engine=token
+QT="$TMP/quiet-tmpdir"; mkdir -p "$QT"
+rc=0; TMPDIR="$QT" run_gql --query query.graphql >"$O" 2>"$E" || rc=$?
+assert G11-first-run-full 0 "$rc" "$E" "store_execute unavailable"
+rc=0; TMPDIR="$QT" run_gql --query query.graphql >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q 'note=engine=token' "$E" && ! grep -q 'store_execute unavailable' "$E"; then ok
+else bad G11b-second-run-short "err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
+
+# G12: SHOPIFY_ADMIN_GQL_QUIET forces the short note even on a first run
+QT2="$TMP/quiet-tmpdir2"; mkdir -p "$QT2"
+rc=0; TMPDIR="$QT2" SHOPIFY_ADMIN_GQL_QUIET=1 run_gql --query query.graphql >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q 'note=engine=token' "$E" && ! grep -q 'store_execute unavailable' "$E"; then ok
+else bad G12-quiet-env "err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
+
+# G12b: QUIET=0 means OFF — the first-run full note (with the store-auth remediation) prints
+QT3="$TMP/quiet-tmpdir3"; mkdir -p "$QT3"
+rc=0; TMPDIR="$QT3" SHOPIFY_ADMIN_GQL_QUIET=0 run_gql --query query.graphql >"$O" 2>"$E" || rc=$?
+assert G12b-quiet-zero-off 0 "$rc" "$E" "store_execute unavailable"
+
+# G13: --out pointing at an existing directory is a clean hard stop, not a stray cp + wc abort
+mkdir -p "$TMP/outdir"
+rc=0; run_gql --engine token --query query.graphql --out "$TMP/outdir" >"$O" 2>"$E" || rc=$?
+assert G13-out-is-dir 5 "$rc" "$E" "error=out_write_failed"
 
 # ---------------------------------------- create-preview-theme.sh cap classifier --
 CAP_RE='theme limit|maximum number of themes|too many themes'

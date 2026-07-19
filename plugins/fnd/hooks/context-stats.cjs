@@ -5,8 +5,10 @@
 // active model, effort. Effort comes straight from the hook input; model and token
 // counts are read verbatim from the transcript's last assistant `usage` entry —
 // Claude Code does not expose /context's own numbers to hooks. Above the warn
-// threshold the notice adds a /compact-or-/clear call-to-action and flags the
-// session for skills via additionalContext. Tunables:
+// threshold the notice adds a /compact-or-/clear call-to-action on every prompt
+// (UI-only, free); the additionalContext flag for skills is emitted ONLY when the
+// usage BAND changes (ok → warn → 75 → 90, and back), tracked in a per-session
+// tmpdir state file — steady-state prompts inject zero model context. Tunables:
 //   FND_CTX_MONITOR on by default; set to 0 to disable (gated in plugin.json's
 //                   UserPromptSubmit command, so a disabled monitor never even
 //                   spawns node)
@@ -16,6 +18,8 @@
 'use strict';
 
 const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
 const TAIL_BYTES = 512 * 1024;
 const ENV_WINDOW = parseInt(process.env.FND_CTX_WINDOW || '', 10) || 0;
@@ -99,6 +103,29 @@ process.stdin.on('end', () => {
       msg += ' — over 100%? a bigger window is active: set FND_CTX_WINDOW=<tokens> to fix this readout';
     }
 
+    // Band tracking: each unique additionalContext copy persists in the conversation,
+    // so emit it only when the band CHANGES — the flag stays visible in history for
+    // skills while steady-state warn-zone prompts stop paying ~40 tokens each.
+    // Everything below WARN_AT is band 0: a custom threshold inside the 75/90 tiers
+    // must not silently pre-record a band and swallow the warn-entry emission.
+    const band = pct < WARN_AT ? 0 : pct >= 90 ? 3 : pct >= 75 ? 2 : 1;
+    const sid = String(
+      input.session_id || path.basename(transcript, '.jsonl'),
+    ).replace(/[^A-Za-z0-9_.-]/g, '');
+    const uid = typeof process.getuid === 'function' ? process.getuid() : 0;
+    const stateFile = path.join(os.tmpdir(), `fnd-ctx-band-${uid}-${sid}`);
+    let prevBand = null;
+    try {
+      prevBand = parseInt(fs.readFileSync(stateFile, 'utf8'), 10);
+    } catch (_) {}
+    if (Number.isNaN(prevBand)) prevBand = null;
+    const bandChanged = band !== prevBand;
+    if (bandChanged) {
+      try {
+        fs.writeFileSync(stateFile, String(band));
+      } catch (_) {}
+    }
+
     // systemMessage is user-facing only; additionalContext (warn-level and up) lets
     // skills condition on "the context monitor flagged this session" without the
     // model echoing a banner into its reply.
@@ -108,12 +135,14 @@ process.stdin.on('end', () => {
         pct >= 75
           ? ' — /compact now (or /clear when the workspace is saved), auto-compact is close'
           : ' — /compact, or /clear when the workspace is saved, at the next step boundary';
-      out.hookSpecificOutput = {
-        hookEventName: 'UserPromptSubmit',
-        additionalContext:
-          `fnd context monitor: ~${pct}% of the ~${windowLabel} context window used. ` +
-          `The developer already sees this notice in the UI — do NOT append any context banner to your reply.`,
-      };
+      if (bandChanged) {
+        out.hookSpecificOutput = {
+          hookEventName: 'UserPromptSubmit',
+          additionalContext:
+            `fnd context monitor: ~${pct}% of the ~${windowLabel} context window used. ` +
+            `The developer already sees this notice in the UI — do NOT append any context banner to your reply.`,
+        };
+      }
     }
     console.log(JSON.stringify(out));
   } catch (_) {}

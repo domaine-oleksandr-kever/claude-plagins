@@ -37,7 +37,7 @@
 #
 # Usage:
 #   shopify-admin-gql.sh --query <file.graphql> [--operation <name>] [--variables <json>] \
-#                        [--variables-file <file.json>] \
+#                        [--variables-file <file.json>] [--out <file>] \
 #                        [--env <path>] [--store <name|domain>] [--api-version <ver>] \
 #                        [--engine auto|store|token]
 #
@@ -46,10 +46,19 @@
 #   --variables      JSON string of GraphQL variables (optional)
 #   --variables-file file holding the variables JSON — use for large payloads (whole
 #                    theme-file bodies): argv has a per-argument kernel limit
+#   --out            write the envelope to this file instead of stdout and print a one-line
+#                    summary: `ok=1 bytes=N out=<path> errors=<none|first-error head>` —
+#                    use for big inspection reads (target the task workspace tmp/), then
+#                    pull fields with jq. NEVER the default: theme-json.sh parses this
+#                    script's stdout and must keep receiving the full envelope.
 #   --env            path to the dotenv file holding the token (default: ./.env; token engine only)
 #   --store          store subdomain or full *.myshopify.com (default: from shopify.theme.toml)
 #   --api-version    Admin API version (default: 2026-04, or $SHOPIFY_ADMIN_API_VERSION)
 #   --engine         auto (default) | store | token
+#
+# The store→token fallback note prints in full once per store (marker in $TMPDIR); later
+# runs print `note=engine=token`. SHOPIFY_ADMIN_GQL_QUIET set to anything but 0 forces
+# the short form always.
 #
 # For the token engine the token is read from $SHOPIFY_ADMIN_TOKEN (already exported), else
 # from the --env file's SHOPIFY_ADMIN_TOKEN= line.
@@ -63,6 +72,7 @@
 set -euo pipefail
 
 QUERY_FILE=""; OPERATION=""; VARIABLES=""; VARIABLES_FILE=""; ENV_FILE=".env"; STORE=""; ENGINE="auto"
+OUT_FILE=""
 API_VERSION="${SHOPIFY_ADMIN_API_VERSION:-2026-04}"
 
 # a value flag must not be the last arg — a bare `shift 2` would exit silently under set -e
@@ -74,6 +84,7 @@ while [ $# -gt 0 ]; do
     --operation)    need_val $# "$1"; OPERATION="$2"; shift 2 ;;
     --variables)    need_val $# "$1"; VARIABLES="$2"; shift 2 ;;
     --variables-file) need_val $# "$1"; VARIABLES_FILE="$2"; shift 2 ;;
+    --out)          need_val $# "$1"; OUT_FILE="$2"; shift 2 ;;
     --env)          need_val $# "$1"; ENV_FILE="$2"; shift 2 ;;
     --store)        need_val $# "$1"; STORE="$2"; shift 2 ;;
     --api-version)  need_val $# "$1"; API_VERSION="$2"; shift 2 ;;
@@ -108,6 +119,26 @@ if [ -z "$STORE" ] && [ -f "shopify.theme.toml" ]; then
 fi
 [ -n "$STORE" ] || { echo "error=no_store (pass --store or set store= in shopify.theme.toml)" >&2; exit 2; }
 case "$STORE" in *.myshopify.com) DOMAIN="$STORE" ;; *) DOMAIN="${STORE}.myshopify.com" ;; esac
+
+# single exit point for the envelope, both engines: inline by default; --out swaps the
+# payload for a summary line so a 20–100 KB inspection read never lands in the caller's
+# context. theme-json.sh never passes --out — its stdout contract is untouched.
+emit_envelope() { # $1 = file holding the {"data"|"errors":…} envelope
+  if [ -z "$OUT_FILE" ]; then cat "$1"; return 0; fi
+  # a directory would make cp drop the envelope INSIDE it and the summary lie about the path
+  if [ -d "$OUT_FILE" ]; then
+    echo "error=out_write_failed out=$OUT_FILE (is a directory)" >&2; exit 5
+  fi
+  cp "$1" "$OUT_FILE" 2>/dev/null \
+    || { echo "error=out_write_failed out=$OUT_FILE" >&2; exit 5; }
+  local bytes errs
+  bytes="$(wc -c < "$OUT_FILE" | tr -d ' ')"
+  # the errors head must survive into the summary — callers gate on it before trusting
+  # the data (and before any follow-up mutation)
+  errs="$(jq -r 'if has("errors") then ((.errors[0].message // (.errors[0]|tostring))[0:160]) else "none" end' "$OUT_FILE" 2>/dev/null)" || errs=""
+  [ -n "$errs" ] || errs="unparseable"
+  echo "ok=1 bytes=$bytes out=$OUT_FILE errors=$errs"
+}
 
 # --- engine 1: shopify store execute (CLI ≥ 4.x + stored store auth) --------------------------
 SKIP_REASON=""
@@ -170,8 +201,10 @@ try_store_execute() {
   if [ "$rc" -eq 0 ]; then
     # `store execute --json` prints BARE data (no {"data":…} envelope, unlike the Admin API
     # itself) — wrap it so both engines return the classic envelope
-    jq -c '{data: .}' "$out" 2>/dev/null || cat "$out"
-    rm -f "$out" "$err"
+    local envf; envf="$(mktemp)"
+    jq -c '{data: .}' "$out" > "$envf" 2>/dev/null || cp "$out" "$envf"
+    emit_envelope "$envf"
+    rm -f "$out" "$err" "$envf"
     return 0
   fi
   local safe_fallback=0
@@ -187,8 +220,10 @@ try_store_execute() {
     local unboxed
     unboxed="$(jq -Rs -c 'gsub("[│\\n\\r]"; "") | match("\\{.*\\}").string | fromjson' "$err" 2>/dev/null || true)"
     if [ -n "$unboxed" ]; then
-      printf '%s\n' "$unboxed"
-      rm -f "$out" "$err"
+      local envf; envf="$(mktemp)"
+      printf '%s\n' "$unboxed" > "$envf"
+      emit_envelope "$envf"
+      rm -f "$out" "$err" "$envf"
       return 0
     fi
     SKIP_REASON="store execute: GraphQL operation failed, and the boxed error JSON could not be parsed: $(tr '\n' ' ' < "$err" | cut -c1-300)"
@@ -213,7 +248,15 @@ if [ "$ENGINE" != "token" ]; then
     echo "error=store_execute_failed ($SKIP_REASON)" >&2
     exit 3
   fi
-  echo "note=store_execute unavailable — falling back to the admin-token engine ($SKIP_REASON)" >&2
+  # the full note is a one-time pointer to the preferred engine — after the first run per
+  # store (or under SHOPIFY_ADMIN_GQL_QUIET) a state-walking session pays 3 words, not 60
+  NOTE_MARK="${TMPDIR:-/tmp}/fnd-gql-fallback-note-$(id -u)-${DOMAIN}"
+  if { [ -n "${SHOPIFY_ADMIN_GQL_QUIET:-}" ] && [ "${SHOPIFY_ADMIN_GQL_QUIET}" != "0" ]; } || [ -f "$NOTE_MARK" ]; then
+    echo "note=engine=token" >&2
+  else
+    echo "note=store_execute unavailable — falling back to the admin-token engine ($SKIP_REASON)" >&2
+    : > "$NOTE_MARK" 2>/dev/null || true
+  fi
 fi
 
 # --- engine 2: admin token + curl -------------------------------------------------------------
@@ -275,7 +318,7 @@ HTTP_CODE="$(curl -sS -X POST "$URL" \
   -o "$RESPF" -w '%{http_code}')" \
   || { echo "error=curl_transport_failed" >&2; exit 5; }
 case "$HTTP_CODE" in
-  2*) cat "$RESPF" ;;
+  2*) emit_envelope "$RESPF" ;;
   *)
     echo "error=http_${HTTP_CODE} url=$URL" >&2
     head -c 600 "$RESPF" | tr '\n' ' ' >&2; echo >&2
