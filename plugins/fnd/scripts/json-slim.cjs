@@ -11,7 +11,7 @@
  * The pipeline is shape-driven (each stage independent, all generic — no per-tool registry),
  * applied by slim() in this order:
  *   1. ADF/rich-doc → markdown via adf-to-md.cjs (the single converter home);
- *   2. noise drop (nulls / empty containers / avatar-class decoration);
+ *   2. noise drop (nulls / empty containers / avatar-class decoration / self REST links);
  *   3. long-string truncation (base64 / data-URIs / long URLs);
  *   4. repetitive same-shape-array crush (a faithful port of Headroom's SmartCrusher).
  * The array-crush spills dropped rows to a file and leaves a `full=<path>` handle, so nothing
@@ -56,12 +56,13 @@ const DEFAULTS = {
   // --- fnd pipeline stages (slim only, not crush) ---
   adf: true, // stage 1: ADF doc nodes → markdown
   noise: true, // stage 3: drop nulls / empty containers / avatar-class keys
+  dropRestLinks: true, // stage 3: drop `self` REST-navigation URLs (Jira/Confluence _links.self)
   truncate: true, // stage 4: clip base64 / data-URI / very long strings
   stringLimit: 200, // stage 4 threshold (chars)
   toon: false, // optional lossless tabular re-serialization of uniform arrays (behind a flag)
   // preserveFields { keyName: true } leaves the value/subtree under those keys uncrushed. Escape
   // hatch: name an ARRAY's own key to keep it whole — a field inside crushable rows does NOT shield
-  // those rows from sampling (row-level preserve is a possible M3 enhancement).
+  // those rows from sampling (row-level preserve is a possible future enhancement).
   preserveFields: {},
 };
 
@@ -807,7 +808,15 @@ function adfStage(value, cfg, depth) {
 
 const AVATAR_KEY = /avatar|iconurl|24x24|16x16|32x32|48x48|thumbnail/i;
 
-// Stage 3 — drop nulls, empty containers, and avatar-class decoration keys.
+// A `self` value that is a REST-navigation URL — Jira/Confluence stamp one on every nested
+// resource (`.../rest/api/2/status/3`, Confluence `_links.self`). The model never dereferences
+// them (it acts through MCP tools, not raw REST), and the full result is spilled for recovery,
+// so dropping them is safe. Matched only on Atlassian's `/rest/` (Jira, classic Confluence) or
+// `/wiki/` (Confluence v2) path markers — NOT a bare `/api/`, which non-Atlassian servers use for
+// real, actionable resource URLs. Precise key+value guard so a `self` holding real content survives.
+const REST_LINK = /^https?:\/\/.*\/(rest|wiki)\//;
+
+// Stage 3 — drop nulls, empty containers, avatar-class decoration keys, and `self` REST links.
 function noiseStage(value, cfg, depth) {
   depth = depth || 0;
   if (depth >= MAX_DEPTH) return value;
@@ -817,6 +826,7 @@ function noiseStage(value, cfg, depth) {
     for (const k of Object.keys(value)) {
       if (cfg.preserveFields && cfg.preserveFields[k]) { out[k] = value[k]; continue; }
       if (AVATAR_KEY.test(k)) continue;
+      if (cfg.dropRestLinks && k === 'self' && typeof value[k] === 'string' && REST_LINK.test(value[k])) continue;
       const v = noiseStage(value[k], cfg, depth + 1);
       if (v === null) continue;
       if (typeof v === 'object' && v !== null && !Array.isArray(v) && Object.keys(v).length === 0) continue;
