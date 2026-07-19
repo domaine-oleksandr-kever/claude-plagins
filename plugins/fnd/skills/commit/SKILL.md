@@ -1,6 +1,6 @@
 ---
 name: commit
-description: Create git commits using the Conventional Commits specification. Use when the user asks to commit changes, write a commit message, or run git commit, or invokes /commit.
+description: Create git commits per the Conventional Commits spec. Use when the user asks to commit changes, write a commit message, or run git commit.
 allowed-tools: Bash(git status*), Bash(git diff*), Bash(git add*), Bash(git commit*), Bash(git log*), Bash(git ls-files*), Read, Glob, Grep, Edit
 ---
 
@@ -18,8 +18,10 @@ Read it before drafting.
 
 ## Review gate (before committing)
 
-Consult the fnd review flow (`${CLAUDE_PLUGIN_ROOT}/references/review-flow.md`). `commit`
-does **not** run the hygiene review itself — it only ensures one happened:
+`commit` does **not** run the hygiene review itself — it only ensures one happened. The
+rule below is complete — the full flow lives in
+`${CLAUDE_PLUGIN_ROOT}/references/review-flow.md`; read it only if the marker semantics
+are unclear:
 
 - Read `.git/.fnd-review`. **No marker for this branch** → offer to run
   `/fnd:pre-commit-review` first; proceed if the developer declines.

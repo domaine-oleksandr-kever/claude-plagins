@@ -1,10 +1,9 @@
 ---
 name: update-translations
 description: >
-  Translate English strings in storefront locale JSON files (`locales/*.json`) into all the theme's
-  other languages, by building a translation-data file and running the repo's translation script.
-  Use when the user asks to translate / localize storefront (customer-facing) copy or add locale
-  translations, or invokes /update-translations. For schema/admin strings use update-schema-translations.
+  Translate English strings in storefront locale files (`locales/*.json`) into the theme's
+  other languages. Use when the user asks to translate / localize storefront (customer-facing)
+  copy or add locale translations. For schema/admin labels use update-schema-translations.
 argument-hint: "(describe the English keys/strings to translate)"
 arguments:
   - name: strings

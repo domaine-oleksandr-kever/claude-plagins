@@ -86,9 +86,9 @@ report and the Jira hand-off comment are distilled from these entries.
 Phase agents never inherit the session model — the conductor passes `model` on every
 spawn (this section is the single home of the assignments): `opus` for reasoning-heavy
 phases (implement, qa, and the fix agents in the qa loop and aftercare), `sonnet` for
-mechanical ones (finalize, steps-to-test, and the aftercare poll/triage agent — its fix
-agents stay `opus`). Inline conductor steps (create-pr, jira-hand-off) spawn no agent, so
-nothing to pin. The
+mechanical ones (finalize, create-pr, steps-to-test, and the aftercare poll/triage
+agent — its fix agents stay `opus`). The inline conductor step (jira-hand-off) spawns no
+agent, so nothing to pin. The
 conductor itself stays on the session model — planning, decomposition, and synthesis are
 where it earns its price. Gotcha: a `CLAUDE_CODE_SUBAGENT_MODEL` env var silently
 overrides every pin, including the bundled agents' frontmatter models — it must be unset

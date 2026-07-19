@@ -1,14 +1,11 @@
 ---
 name: report-plugin-issue
 description: >
-  File a GitHub issue on the fnd plugin repo (domaine-oleksandr-kever/claude-plagins) when a
-  plugin component misbehaves — a bundled script crashes, exits silently, or prints a
-  wrong/misleading error; a converter (md-to-adf / adf-to-md) mangles content; a skill or
-  reference contradicts actual behavior; an agent or hook breaks. Collects sanitized debug info
-  (versions, exact command, output — never tokens or secrets), checks for duplicates, and
-  creates the issue only after the developer approves the draft. Use when an fnd
-  script/skill/agent fails or behaves incorrectly, when the user reports a plugin bug, or
-  invokes /report-plugin-issue.
+  File a GitHub issue on the fnd plugin repo when a plugin component misbehaves — a bundled
+  script, converter, skill, reference, agent, or hook fails or contradicts actual behavior.
+  Collects sanitized debug info (never secrets), checks duplicates, posts only after the
+  developer approves the draft. Use when an fnd script / skill / agent fails or behaves
+  incorrectly, or the user reports a plugin bug.
 argument-hint: "[one-line summary of the defect — inferred from the conversation if omitted]"
 arguments:
   - name: problem
@@ -19,8 +16,7 @@ allowed-tools: Read, Grep, Glob, Write, Bash(gh auth status), Bash(gh --version)
 # Report a plugin issue
 
 File a defect against the **fnd plugin itself** on
-`https://github.com/domaine-oleksandr-kever/claude-plagins`, so plugin bugs get fixed at the
-source instead of being silently worked around in every project. **Do not skip the ✋
+`https://github.com/domaine-oleksandr-kever/claude-plagins`. **Do not skip the ✋
 checkpoint — never post without explicit approval.**
 
 ## Step 0 — Is it actually a plugin bug?

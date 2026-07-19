@@ -1,6 +1,6 @@
 ---
 name: bug-hunter
-description: Adversarial correctness review of a branch's diff — hunts for real bugs (races, merchant-invariant bypasses, state divergence between paths, inherited-behavior traps, dropped data), not hygiene. Spawn it from the fnd review flow (pre-commit primary, PR backstop) and the ship qa phase, in parallel with change-reviewer / live QA. Read-only; returns verified findings, each with a concrete failure scenario.
+description: Adversarial correctness review of a branch's diff — hunts real bugs (races, invariant bypasses, state divergence, dropped data), not hygiene. Spawn from the fnd review flow (pre-commit primary, PR backstop) and ship QA, in parallel with change-reviewer / live QA. Read-only; returns verified findings with concrete failure scenarios.
 model: opus
 effort: high
 tools: Read, Grep, Glob, Bash

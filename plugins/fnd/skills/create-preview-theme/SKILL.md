@@ -1,14 +1,10 @@
 ---
 name: create-preview-theme
 description: >
-  Create an unpublished Shopify PREVIEW theme from your branch — builds the local code and
-  overlays the dev theme's customizer settings, so the preview shows YOUR (fixed) code with
-  realistic content. A standalone wrapper around create-preview-theme.sh, also handy for testing
-  the mechanics outside the full PR flow. Reads store / dev-theme-id / Theme Access token from
-  shopify.theme.toml (never exposing the token) and returns the theme id + preview / editor links.
-  Use when the user asks to create / make / spin up a preview theme or test the preview script, or
-  invokes /create-preview-theme. To redeploy code into an EXISTING preview theme, use
-  update-preview-theme.
+  Create a NEW unpublished Shopify PREVIEW theme from the current branch — builds local code,
+  overlays the dev theme's customizer settings, returns the theme id + preview / editor links.
+  Use when the user asks to create / make / spin up a preview theme or test the preview script.
+  For an EXISTING preview theme use update-preview-theme.
 argument-hint: "[jira-keys] [theme-name] [--reuse] [preview-path]"
 arguments:
   - name: jira_keys
@@ -25,10 +21,7 @@ allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/scripts/create-preview-theme.sh*)
 # Create preview theme
 
 Build a named, **unpublished** preview theme = **your branch's code (built locally)** + the
-**dev theme's customizer settings**. Code comes from the repo (so the fixes in your branch show
-up); only the settings (`config/settings_data.json`, `templates/**/*.json`, section groups
-`sections/*.json`) are copied from the configured dev theme. This deliberately does **not** clone
-the dev theme's code — that code may be stale or broken. This skill is a thin wrapper over
+**dev theme's customizer settings**. This skill is a thin wrapper over
 `${CLAUDE_PLUGIN_ROOT}/scripts/create-preview-theme.sh` (the same
 script `create-pull-request` uses), so running it is a good way to **test the mechanics in
 isolation**. To redeploy code into an existing preview theme without touching its settings, use
@@ -64,10 +57,7 @@ isolation**. To redeploy code into an existing preview theme without touching it
    If a `preview_path` is known, also give the page-deep-linked preview
    (`<preview_url-origin>/<path>?preview_theme_id=<id>`) and the editor-on-template link
    (`…/editor?previewPath=<url-encoded path>`).
-   - On **`error=settings_drift`** the dev theme is **ahead of this branch** — Shopify won't accept
-     its settings onto a preview built from this branch's code. The script reports the real `cause=`
-     and — only when it created the theme this run — deletes the code-only copy (a failed cleanup
-     surfaces as `created_theme_deleted=failed`; a reused pre-existing theme is never deleted).
+   - On **`error=settings_drift`** the dev theme is **ahead of this branch**.
      **Don't retry** — tell the developer to
      **duplicate the dev theme manually in the admin** and rename it to the `[ELC-…]` name
      (click-path and why a server-side copy works:

@@ -1,13 +1,9 @@
 ---
 name: write-technical-approach
 description: >
-  Draft a Domaine Technical Approach (TA) for a Jira ticket — Workflow 2 of the
-  Agentic Assisted Development series. Ingests the ticket's Description and
-  Acceptance Criteria via Atlassian MCP, validates readiness, then writes the
-  short-format TA markdown (Summary · Assumptions · Data / Config · Implementation ·
-  Accessibility & Performance · Dependencies · Files) and (after approval) updates the Jira
-  Technical Approach field. Use when the user asks to write, draft, or update a
-  Technical Approach / TA for a Jira ticket, or invokes /write-technical-approach.
+  Draft a Domaine Technical Approach (TA) for a Jira ticket from its Description and
+  Acceptance Criteria, then (after approval) update the Jira TA field — Workflow 2. Use when
+  the user asks to write / draft / update a Technical Approach or TA for a Jira ticket.
 argument-hint: "<jira-ticket-url-or-key>"
 arguments:
   - name: jira_ticket
@@ -24,7 +20,7 @@ Operating mode: **Phase 1 in plan mode** (analysis, outline); leave plan mode on
 
 ## North star
 
-**The ticket's Description and AC govern the TA** — decisions not grounded in the AC land in **Assumptions** (developer-confirmed, with a reason), ambiguous or incomplete AC **stops** the draft, and any bullet that traces to neither AC, assumption, nor repo constraint gets cut. Full grounding rules: `${CLAUDE_PLUGIN_ROOT}/references/technical-approach-format.md` §North star.
+**The ticket's Description and AC govern the TA** — ungrounded decisions land in **Assumptions** (developer-confirmed), ambiguous or incomplete AC **stops** the draft. Full grounding rules: `${CLAUDE_PLUGIN_ROOT}/references/technical-approach-format.md` §North star.
 
 ## Global rules
 
@@ -37,7 +33,7 @@ Operating mode: **Phase 1 in plan mode** (analysis, outline); leave plan mode on
 
 ## Audience & voice
 
-Senior-Shopify-developer audience, **~3-minute read**, no tutorial content, no AI-speak — full audience + anti-pattern guidance: `${CLAUDE_PLUGIN_ROOT}/references/technical-approach-format.md` §Target audience / §Voice.
+Senior-Shopify-developer audience, **~3-minute read** — full guidance: `${CLAUDE_PLUGIN_ROOT}/references/technical-approach-format.md` §Target audience / §Voice.
 
 ---
 
@@ -45,10 +41,10 @@ Senior-Shopify-developer audience, **~3-minute read**, no tutorial content, no A
 
 1. **Ingest the ticket** — context-first: full (not summarized) in-conversation fields count; second stop the task workspace `.claude/fnd/<TICKET>/` if fresh; otherwise delegate to the **`jira-reader`** subagent and **save its output to the workspace**. This skill needs: Description, AC, **Assumptions**, Technical Approach, Documentation Links, Steps to Test, `figma_urls`. `needs_clarification` → ask the developer.
 2. **Validate readiness** — confirm Description and AC exist and are sufficient. If missing or ambiguous, **stop**, summarize gaps, ask how to proceed.
-3. **Read every linked doc.** Read all links the `jira-reader` returned (`documentation_links`, `notion_urls`, `figma_urls`, `other_links`) per `${CLAUDE_PLUGIN_ROOT}/references/reading-linked-docs.md`. **Reuse before fetching:** in-conversation (full) or fresh workspace copies (`doc-<slug>.md`) count — fetch only missing/stale links, and save fresh extracts back. **Notion is mandatory** (read via the Notion MCP; **if it isn't connected, stop and ask the developer** to enable it or paste the content, don't draft around it). These docs often hold the real data model and final copy the TA must reflect.
+3. **Read every linked doc** the `jira-reader` returned, per `${CLAUDE_PLUGIN_ROOT}/references/reading-linked-docs.md`. **Notion is mandatory — if its MCP isn't connected, stop and ask the developer** rather than drafting around it; these docs often hold the real data model and final copy the TA must reflect.
 4. **Analyse the codebase** — inspect relevant areas for patterns, layout, dependencies, constraints. Apply the repo's coding rules (Liquid, blocks, Tailwind, a11y, etc.).
 5. **Clarify ambiguities** — ask concise scope/edge-case/environment questions before drafting.
-6. **Draft the TA outline** — use the short format in `${CLAUDE_PLUGIN_ROOT}/references/technical-approach-format.md`. Seven **H4** sections, fixed names and order, no numbering and no title/metadata block: **Summary** (1–2 dense paragraphs), **Assumptions**, **Data / Config**, **Implementation**, **Accessibility & Performance**, **Dependencies**, **Files** (`**New:**` / `**Modified:**` inline path lists). Dense bullets, inline code for every path/object/setting, `·` separators. Anchor every bullet to the AC. **If the ticket/linked docs define a metafield or metaobject, name those definitions in Data / Config** (types, keys, field list, owner/namespace) and optionally carry the STEP 0 inspection query — see `${CLAUDE_PLUGIN_ROOT}/references/metafield-metaobject-setup.md` — so `develop-feature-or-fix` starts from a known target. When store access is available, **verify Data / Config assumptions against the real store instead of guessing**: read-only Admin GraphQL via `${CLAUDE_PLUGIN_ROOT}/scripts/shopify-admin-gql.sh`, current customizer/theme-JSON state via `${CLAUDE_PLUGIN_ROOT}/scripts/theme-json.sh get` (`${CLAUDE_PLUGIN_ROOT}/references/theme-customizer-state.md`).
+6. **Draft the TA outline** — read `${CLAUDE_PLUGIN_ROOT}/references/technical-approach-format.md` now and follow its skeleton exactly (seven fixed **H4** sections, dense bullets, inline code, `·` separators, no title/metadata block). Anchor every bullet to the AC. **If the ticket/linked docs define a metafield or metaobject, name those definitions in Data / Config** (types, keys, field list, owner/namespace) and optionally carry the STEP 0 inspection query — see `${CLAUDE_PLUGIN_ROOT}/references/metafield-metaobject-setup.md` → Planning & QA digest (the file's first ~45 lines — read only that) — so `develop-feature-or-fix` starts from a known target. When store access is available, **verify Data / Config assumptions against the real store instead of guessing**: read-only Admin GraphQL via `${CLAUDE_PLUGIN_ROOT}/scripts/shopify-admin-gql.sh`, current customizer/theme-JSON state via `${CLAUDE_PLUGIN_ROOT}/scripts/theme-json.sh get` (`${CLAUDE_PLUGIN_ROOT}/references/theme-customizer-state.md`).
 
 ### ✋ Checkpoint — Phase 1
 
@@ -65,7 +61,7 @@ Present the **outline and open questions**. Wait for approval or edits before Ph
 
 Present the draft path and summary (with any deep-research findings folded in). The developer must **read, edit, and approve** before any Jira update.
 
-3. **Update Jira** (only after approval) — ask whether **(a)** the developer updates manually or **(b)** you use Atlassian MCP. Put the approved TA in the **Technical Approach** custom field, not only description/comments. The field is rich-text (ADF): `node ${CLAUDE_PLUGIN_ROOT}/scripts/md-to-adf.cjs --no-tables docs/technical-approaches/<TICKET-KEY>-technical-approach.md`, then `editJiraIssue` with `fields: { "<TA field id>": <the ADF JSON> }`. All conversion rules (never raw markdown into a custom field, keep the ADF compact, size warning → trim/restructure): **`${CLAUDE_PLUGIN_ROOT}/references/jira-custom-fields.md` → Use the converter / Keep the ADF compact**.
+3. **Update Jira** (only after approval) — ask whether **(a)** the developer updates manually or **(b)** you use Atlassian MCP. Put the approved TA in the **Technical Approach** custom field, not only description/comments. The field is rich-text (ADF): `node ${CLAUDE_PLUGIN_ROOT}/scripts/md-to-adf.cjs --no-tables docs/technical-approaches/<TICKET-KEY>-technical-approach.md`, then `editJiraIssue` with `fields: { "<TA field id>": <the ADF JSON> }`. Conversion rules: **`${CLAUDE_PLUGIN_ROOT}/references/jira-adf-write.md`**.
 
 ## Quality bar
 

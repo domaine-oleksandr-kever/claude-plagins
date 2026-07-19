@@ -1,13 +1,10 @@
 ---
 name: update-preview-theme
 description: >
-  Redeploy your branch's code into an EXISTING unpublished preview theme — rebuilds locally and
-  pushes code only, leaving the theme's customizer settings untouched. Use when a preview theme's
-  code is broken or stale and needs a fresh build (e.g. after a fix), so reviewers see the update
-  without losing the configured content. A thin wrapper around create-preview-theme.sh `refresh`.
-  Use when the user asks to update / refresh / redeploy / rebuild a preview theme, push a fix to an
-  existing preview, or invokes /update-preview-theme. To make a NEW preview theme, use
-  create-preview-theme.
+  Redeploy the current branch's code into an EXISTING unpublished preview theme — rebuild and
+  push code only, customizer settings untouched. Use when the user asks to update / refresh /
+  redeploy / rebuild a preview theme or push a fix to an existing preview. For a NEW preview
+  theme use create-preview-theme.
 argument-hint: "<theme-id> [--no-build] [--build-cmd \"<cmd>\"]"
 arguments:
   - name: theme_id

@@ -1,10 +1,9 @@
 ---
 name: fix-breaking-changes
 description: >
-  Apply Shopify theme breaking-change fixes documented in `breaking-changes.md` to `templates/**/*.json`
-  and `config/settings_data.json` via a customizable Node script, then verify with theme check. Use
-  when the user asks to fix / apply breaking changes, migrate templates after a major version bump, or
-  invokes /fix-breaking-changes. Pairs with get-breaking-changes (which produces the report).
+  Apply the fixes documented in `breaking-changes.md` to `templates/**/*.json` and
+  `config/settings_data.json` via a Node script, then verify with theme check. Use when the
+  user asks to fix / apply breaking changes or migrate templates after a major version bump.
 argument-hint: "(reads breaking-changes.md from the project root)"
 allowed-tools: Read, Edit, Grep, Glob, Bash(mkdir -p scripts), Bash(cp ${CLAUDE_PLUGIN_ROOT}/skills/fix-breaking-changes/scripts/fix-breaking-changes.template.js scripts/fix-breaking-changes.js), Bash(node scripts/fix-breaking-changes.js), Bash(shopify theme check*), Bash(rm scripts/fix-breaking-changes.js)
 ---
@@ -23,11 +22,7 @@ Apply the fixes documented in `breaking-changes.md` to `templates/**/*.json` and
    mkdir -p scripts
    cp ${CLAUDE_PLUGIN_ROOT}/skills/fix-breaking-changes/scripts/fix-breaking-changes.template.js scripts/fix-breaking-changes.js
    ```
-3. **Customize `applyFixes`** in `scripts/fix-breaking-changes.js` — uncomment/adapt the relevant patterns:
-   - **Remove setting:** `if (result.settings?.key === 'value') delete result.settings.key`
-   - **Block type:** `if (result.type === 'old-type') result.type = 'new-type'`
-   - **Value update:** `if (result.settings?.prop === 'old') result.settings.prop = 'new'`
-   - **Rename prop:** `result.newName = result.oldName; delete result.oldName`
+3. **Customize `applyFixes`** in `scripts/fix-breaking-changes.js` — uncomment/adapt the patterns documented in the template's own comments.
 4. **Run it:**
    ```bash
    node scripts/fix-breaking-changes.js

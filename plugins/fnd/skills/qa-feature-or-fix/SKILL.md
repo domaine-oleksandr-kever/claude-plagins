@@ -1,11 +1,9 @@
 ---
 name: qa-feature-or-fix
 description: >
-  Structured QA for a completed change against its Jira ticket — Workflow 4 of the Agentic Assisted
-  Development series. Ingests the ticket, reviews the diff vs the TA/AC, builds an approved QA
-  checklist, then runs browser-assisted checks and produces a pass/fail report. Use when the user
-  asks to QA / test / verify a completed feature or fix against a Jira ticket, or invokes
-  /qa-feature-or-fix.
+  Structured QA of a completed change against its Jira ticket — diff review vs TA/AC,
+  approved checklist, browser-assisted checks, pass/fail report — Workflow 4. Use when the
+  user asks to QA / test / verify a completed feature or fix against a Jira ticket.
 argument-hint: "<jira-url-or-key> [preview-url-or-theme]"
 arguments:
   - name: jira_ticket
@@ -32,7 +30,7 @@ Operating mode: **Phase 1 in plan mode** (ingest, review diff vs TA/AC, build th
 
 ## Phase 1 — QA preparation `[plan mode]`
 
-1. **Ingest the ticket** — context-first: full (not summarized) in-conversation fields count; second stop the task workspace `.claude/fnd/<TICKET>/` if fresh (it also holds dev's test breadcrumbs in `notes.md`); otherwise delegate to the **`jira-reader`** subagent and **save its output to the workspace**. This skill needs: Description, AC, Technical Approach, Steps to Test, environment notes (plus `figma_urls` / `notion_urls` / `other_links`). `needs_clarification` → ask. **Read the linked docs** that define expected behaviour/data/copy per `${CLAUDE_PLUGIN_ROOT}/references/reading-linked-docs.md` — reuse before fetching (in-conversation or fresh workspace `doc-<slug>.md` copies count; save fresh extracts back); if the Notion MCP isn't connected, tell the developer rather than QA'ing blind.
+1. **Ingest the ticket** — context-first: full (not summarized) in-conversation fields count; second stop the task workspace `.claude/fnd/<TICKET>/` if fresh (it also holds dev's test breadcrumbs in `notes.md`); otherwise delegate to the **`jira-reader`** subagent and **save its output to the workspace**. This skill needs: Description, AC, Technical Approach, Steps to Test, environment notes (plus `figma_urls` / `notion_urls` / `other_links`). `needs_clarification` → ask. **Read the linked docs** that define expected behaviour/data/copy per `${CLAUDE_PLUGIN_ROOT}/references/reading-linked-docs.md`; Notion MCP missing → tell the developer rather than QA'ing blind.
 2. **Analyse the implementation** — review the diff (branch/PR or local — ask which source); cross-check changes against the TA and each AC.
 3. **Generate the QA checklist** — rows for: each **acceptance criterion** → concrete test actions + expected results; **design conformance** vs the Figma build spec when a design is linked or its spec is already in context; **edge cases** from TA or code review; **break-it cases** (always include this group — derive the rows per `${CLAUDE_PLUGIN_ROOT}/references/break-it-qa.md` → Deriving the rows, read it now); **accessibility** (keyboard, focus order, semantics, visible focus, contrast on critical UI); **performance** (layout shift, heavy images/scripts, critical rendering path if touched); **cross-browser / viewport** if layout-critical.
 
@@ -45,10 +43,10 @@ Present the checklist; let the developer add/remove cases. Wait for approval bef
 ## Phase 2 — QA execution
 
 1. **Automated / assisted validation** — with Chrome DevTools MCP (when preview is available): visual pass vs Figma if linked — **context-first:** reuse `figma-reader` build specs already in this conversation in full (e.g. from a `develop-feature-or-fix` run) or in the task workspace (`.claude/fnd/<TICKET>/figma-<node-id>.md`); spawn one `figma-reader` per `figma_urls` entry, in parallel, **only for specs you don't already have**, saving fresh specs to the workspace — console errors, basic performance signals (LCP/CLS context as applicable). Record **Pass / Fail / Needs review** per item with short evidence (what you checked, what you saw).
-   - **Data-driven AC — exercise each configured state, don't assume it** (store access required): flip the value via `${CLAUDE_PLUGIN_ROOT}/scripts/shopify-admin-gql.sh`, reload, verify, **restore defaults when done** — walk every enumerated/optional/conditional state, inspect the DOM (not just the visual), and mind propagation lag (re-query → hard-reload → retry before calling a Fail). Full pattern: `${CLAUDE_PLUGIN_ROOT}/references/metafield-metaobject-setup.md`.
-   - **Customizer-driven AC — same discipline through theme JSON** via `${CLAUDE_PLUGIN_ROOT}/scripts/theme-json.sh` (snapshot → `set` → reload → verify → restore; the live theme is refused), setting ids/values from the section's `{% schema %}`. Pattern: `${CLAUDE_PLUGIN_ROOT}/references/theme-customizer-state.md`.
+   - **Data-driven AC — exercise each configured state, don't assume it** (store access required): flip the value via `${CLAUDE_PLUGIN_ROOT}/scripts/shopify-admin-gql.sh` → reload → verify → **restore**, walking every enumerated/optional/conditional state; inspect the **DOM, not just the visual**; mind propagation lag (retry before calling a Fail). Full pattern: `${CLAUDE_PLUGIN_ROOT}/references/metafield-metaobject-setup.md` → Verifying data-driven AC.
+   - **Customizer-driven AC — same discipline through theme JSON** via `${CLAUDE_PLUGIN_ROOT}/scripts/theme-json.sh` (snapshot → `set` → reload → verify → **restore**; live theme refused). Pattern: `${CLAUDE_PLUGIN_ROOT}/references/theme-customizer-state.md`.
    - **Break-it rows** — execute per `${CLAUDE_PLUGIN_ROOT}/references/break-it-qa.md` → Executing the rows: hostile values through the same two state patterns (restore after), timing via throttle/races; a row that breaks the feature is a **finding** with evidence + the exact hostile value, filed blocking/non-blocking.
-2. **Report findings** — summarize in a structured table or list; separate **blocking** vs **non-blocking**; suggest Jira updates (QA notes, screenshots, reopen criteria) but let the developer own ticket edits unless they ask you to use Atlassian MCP. **If you do write to a rich-text field or comment via MCP, convert the markdown to ADF first** — `node ${CLAUDE_PLUGIN_ROOT}/scripts/md-to-adf.cjs --no-tables <file>`, then pass the ADF object to `editJiraIssue` / `addCommentToJiraIssue`. All conversion rules (never raw markdown into a custom field, size warning → trim): `${CLAUDE_PLUGIN_ROOT}/references/jira-custom-fields.md` → Use the converter / Keep the ADF compact. Append the pass/fail outcome and confirmed findings (with their repro values) to the workspace `qa.md`, below the checklist.
+2. **Report findings** — summarize in a structured table or list; separate **blocking** vs **non-blocking**; suggest Jira updates (QA notes, screenshots, reopen criteria) but let the developer own ticket edits unless they ask you to use Atlassian MCP. **If you do write to a rich-text field or comment via MCP, convert the markdown to ADF first** — `node ${CLAUDE_PLUGIN_ROOT}/scripts/md-to-adf.cjs --no-tables <file>`, then pass the ADF object to `editJiraIssue` / `addCommentToJiraIssue`. Conversion rules: `${CLAUDE_PLUGIN_ROOT}/references/jira-adf-write.md`. Append the pass/fail outcome and confirmed findings (with their repro values) to the workspace `qa.md`, below the checklist.
 
 ## Quality bar
 

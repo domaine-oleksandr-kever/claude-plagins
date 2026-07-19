@@ -1,6 +1,6 @@
 ---
 name: pre-commit-review
-description: Review the branch's changed files before committing — verify every comment is accurate and still matches the code, strip ticket references from comments (Jira task numbers like ELC-123 and ticket-section pointers like "(AC 1a)", "(TA 1a)", "Acceptance Criteria", "Technical Approach"), surface refactor / cleanup opportunities, and hunt the diff for correctness bugs (bug-hunter agent — races, broken invariants, state divergence). Produces a plan the developer approves before any edit. Use when the user is about to commit, says "before commit", asks to tidy/clean a branch, review comments or check for stale comments / leftover ticket numbers, or asks to review the changes for bugs, or invokes /pre-commit-review.
+description: Review the branch's changed files before committing — comment accuracy, stripping ticket references from comments (ELC-123, "(AC 1a)"), refactor opportunities, and a bug-hunter pass on the diff; produces a plan the developer approves before any edit. Use when the user is about to commit, says "before commit", asks to tidy / clean a branch, check for stale comments or leftover ticket numbers, or review the changes for bugs.
 ---
 
 # Pre-commit review
@@ -14,29 +14,24 @@ a written plan → developer approves/corrects → apply. **Never commits** (rep
 This skill is the primary home of the fnd review flow. Follow the shared contract in
 `${CLAUDE_PLUGIN_ROOT}/references/review-flow.md`:
 
-- Compute `branch` / `base` / `diff_hash` and read `.git/.fnd-review`.
-- **First review on this branch** (`reviewed_before == no`) → run the full pass below.
-- **Already reviewed on this branch** (`reviewed_before == yes`) → **ask** the developer
-  `[ full re-review ] / [ only the changed files ] / [ skip ]`, enriched with what changed
-  since the last review (recommend *skip* if `diff_hash` is unchanged). Honour their choice.
+- Compute `branch` / `base` / `diff_hash` per §1 and read `.git/.fnd-review`; **first
+  review on this branch** → run the full pass below; **already reviewed** → the §3 ask
+  (`[ full re-review / only the changed files / skip ]`) — honour the choice.
 
-After the pass is applied (step 4), **write/refresh the marker**.
+After the pass is applied (step 4), **write/refresh the marker** (review-flow's marker block).
 
 ## 1. Determine scope
 
-Diff against **`develop` if it exists (local, else `origin/develop`), else `main`** — from the
-merge-base to the **working tree**, so committed, staged, and not-yet-staged work all land in
-scope (this review runs *before* the commit):
+Scope = review-flow §1's diff — merge-base of the resolved `$base` to the **working tree**,
+so committed, staged, and unstaged work all land in scope (this review runs *before* the
+commit):
 
 ```bash
-base=$(git show-ref --verify --quiet refs/heads/develop && echo develop \
-  || { git show-ref --verify --quiet refs/remotes/origin/develop && echo origin/develop || echo main; })
-mb=$(git merge-base "$base" HEAD)
-git diff --name-only "$mb"
+git diff --name-only "$mb"   # $base / $mb per review-flow §1
 ```
 
-Review **only these files** (untracked new files surface via check D). Read each one (the diff +
-enough surrounding code to judge comments).
+Review **only these files** (untracked new files surface via check D) — produce the list
+only; the review agents read them (step 2).
 
 ## 2. Run the five checks
 
@@ -67,12 +62,8 @@ The five checks (A, C, and F full definitions live in the agents — their singl
   Jira keys (`\b[A-Z]{2,}-\d+\b`) and ticket-section pointers (`(AC 1a)`, `TA 3b`, and
   `Acceptance Criteria` / `Technical Approach` / `Steps to Test` used as ticket references).
   Propose removing the reference while keeping any useful context (reword to say what the code
-  does or why — don't just delete the sentence). First-pass signal:
-  ```bash
-  git diff "$mb" | grep -nE '^\+[^+]' \
-    | grep -E '\b[A-Z]{2,}-[0-9]+\b|\((AC|TA)[^)]*\)|\b(AC|TA) [0-9]+[a-z]?\b|Acceptance Criteria|Technical Approach|Steps to Test'
-  ```
-  (`^\+[^+]` keeps `+++ b/<path>` diff headers out of the candidates.) Raw hits go to
+  does or why — don't just delete the sentence). First-pass signal: review-flow's
+  B-candidates grep. Raw hits go to
   the agent, which confirms each is inside a **comment** and applies the false-positive
   whitelist — its single home is the `change-reviewer` definition.
 - **C — Refactor / improvement (required)** — run by the agent: duplication, dead code, unclear
@@ -127,14 +118,8 @@ reflects the post-edit state — see `${CLAUDE_PLUGIN_ROOT}/references/review-fl
 Include the `correctness_hash` line when check F was handled this pass (bug-hunter ran,
 or the gate said not applicable):
 
-```bash
-branch=$(git rev-parse --abbrev-ref HEAD)
-diff_hash=$(git diff "$(git merge-base "$base" HEAD)" | git hash-object --stdin)
-{ echo "branch=$branch"; echo "base=$base"; echo "diff_hash=$diff_hash"; \
-  echo "reviewed_at_head=$(git rev-parse HEAD)"; } > .git/.fnd-review
-# ONLY when check F was handled this pass (bug-hunter ran, or gate: not applicable):
-echo "correctness_hash=$diff_hash" >> .git/.fnd-review
-```
+Write it with review-flow's marker block, recomputing `diff_hash` from the post-edit tree;
+append the `correctness_hash` line only when check F was handled this pass.
 
 ## Guardrails
 

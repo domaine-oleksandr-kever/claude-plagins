@@ -1,11 +1,10 @@
 ---
 name: preflight-checks
 description: >
-  Validate the local environment — MCP servers, CLI tools, workspace/project context, project
-  skills & rules, and the local dev server — before running the other Agentic Assisted Development
-  workflows. Workflow 1 of the series; run at session start or when switching projects. Produces a
-  grouped pass/fail report and flags blockers. Use when the user asks to run preflight / environment
-  checks, validate tooling or MCP connectivity before starting work, or invokes /preflight-checks.
+  Validate the local environment — MCP servers, CLI tools, project context, skills & rules,
+  dev server — and produce a pass/fail report with blockers — Workflow 1; run at session
+  start or when switching projects. Use when the user asks to run preflight / environment
+  checks or validate tooling / MCP connectivity.
 argument-hint: "(no args — validates the current workspace)"
 arguments:
   - name: workspace
@@ -16,10 +15,6 @@ allowed-tools: Read, Glob, Bash(shopify version), Bash(node -v), Bash(npm -v), B
 # Preflight Checks
 
 Confirm required tooling is installed, configured, and authenticated so you don't hit failures mid-workflow. After this passes, the environment is cleared for Workflows 2–6.
-
-Series position: Workflow 1 — runs before everything else.
-Input: confirm the **workspace** is the intended project root (`workspace` argument).
-Operating mode: **Phase 1 in plan mode** (validation); Phase 2 consolidates the report, flags blockers, gets sign-off.
 
 ## Global rules
 

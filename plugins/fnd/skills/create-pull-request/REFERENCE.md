@@ -13,9 +13,7 @@ GitHub PR template exists in the repo, merge these sections into it rather than 
 Examples:
 
 - `[ELC-42][Feature] PowerReviews integration with star ratings, review snippets, and write form`
-- `[ELC-108][Fix] Mega-menu closing on hover when submenu is active`
 - `[ELC-299/307/309/315/382][Fix] PDP batch: gallery focus, mobile zoom, swatch labels, sticky CTA, price alignment`
-- `[ELC-73][Refactor] Extract shared header logic into reusable snippets`
 
 ## Body sections
 
@@ -23,9 +21,9 @@ Examples:
 
 1. **Summary** — what was implemented and why (short, reviewer-friendly).
 2. **Jira ticket** — key + URL (list every ticket when the PR closes more than one).
-3. **Theme preview** — the conditional table below.
-
-> ⚠️ **The Theme preview table goes in the top third of the body — never at the bottom.** It is the #3 section, immediately after Jira, *above* Technical approach / Changes / Steps to test / QA / Notes. Do **not** reorder these three, do not rename them away, and do not push the preview table down among the trailing sections. A reviewer must hit the preview link without scrolling.
+3. **Theme preview** — the conditional table below, in the **top third of the body — never
+   at the bottom** among the trailing sections: a reviewer must hit the preview link
+   without scrolling. Do not reorder or rename these three.
 
 Then the remaining sections (adapt headings if a team template exists; their relative order is flexible, but they all come **after** the fixed three):
 
@@ -64,17 +62,12 @@ skill pushes code only.
 > `[ELC-…]` name, and re-runs `create-pull-request` with `theme_name` + `theme_url` +
 > `theme_admin_url` — which makes the skill use that theme and skip auto-creation.
 
-Code pushes never use `--path .`. The script **assembles a clean push root** containing only the
-canonical theme dirs (`assets blocks config layout locales sections snippets templates`, via APFS
-clonefile so it's instant) and pushes that, so non-theme paths in the repo (multi-brand build
-sources, `tmp/` artifacts, root dev files, `src/`, `schemas/`, `node_modules/`) are physically
-absent from the push. This is stricter than a `--only` glob whitelist: Shopify's matcher is loose
-(`--only "snippets/**"` also re-captures nested `multi-brand/**/snippets/*`), so a glob leaks but a
-clean directory can't. Without it `shopify theme push --path .` scans those files and the CLI
-crashes parsing the API's rejection of an invalid asset. For an unusual file living *inside* a
-theme dir that still shouldn't ship, pass `--ignore-extra "<glob>"` (both `create` and `refresh`
-accept it, repeatable). On a push failure the script prints the real cause plus a `log=<path>` to
-the full `shopify` stderr — read that, don't guess.
+Code pushes never use `--path .` — the script **assembles a clean push root** of only the
+canonical theme dirs and pushes that, so non-theme repo paths can't leak into the push or crash
+the CLI. For a file living *inside* a theme dir that still shouldn't ship, pass
+`--ignore-extra "<glob>"` (both `create` and `refresh` accept it, repeatable). On a push failure
+the script prints the real cause plus a `log=<path>` to the full `shopify` stderr — read that,
+don't guess.
 
 > **Security:** the access token lives in `shopify.theme.toml`. **Never `Read` that file** —
 > it would pull the token into context. The script consumes the token inside the `shopify`

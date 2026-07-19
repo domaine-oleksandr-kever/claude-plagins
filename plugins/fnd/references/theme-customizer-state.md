@@ -24,11 +24,7 @@ metaobjects, files) goes through `${CLAUDE_PLUGIN_ROOT}/scripts/shopify-admin-gq
 
 ## Why these files never route through the working tree
 
-Foundation repos put the whole JSON content layer in `.shopifyignore` deliberately: it's the
-**code vs content boundary**. The store owns that runtime state — the live theme's content is the
-merchant's, and the persistent dev theme (`theme=` in `shopify.theme.toml`) carries content the
-team arranged in the customizer. Excluding it from CLI sync guarantees code pushes never clobber
-content. Two consequences for you:
+The whole JSON content layer is in `.shopifyignore` deliberately. Two consequences for you:
 
 - `shopify theme dev` will **neither upload nor hot-reload** local edits to these paths — editing
   JSON inside the project does nothing remotely. Edit the theme directly instead (this script).

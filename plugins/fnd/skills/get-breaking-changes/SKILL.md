@@ -1,11 +1,10 @@
 ---
 name: get-breaking-changes
 description: >
-  Identify confirmed breaking changes merged since the last breaking (major) version of a repo by
-  scanning PRs labeled "Breaking changes", classifying their impact, and writing a `breaking-changes.md`
-  report with actionable find/replace patterns. Use when the user asks what breaking changes shipped,
-  to audit breaking changes before an upgrade, or invokes /get-breaking-changes. Pairs with
-  fix-breaking-changes (which applies the report).
+  Find confirmed breaking changes merged since the repo's last major version by scanning PRs
+  labeled "Breaking changes" and write a `breaking-changes.md` report with find/replace
+  patterns. Use when the user asks what breaking changes shipped or to audit breaking changes
+  before an upgrade.
 argument-hint: "[repo owner/name] [since-version]"
 arguments:
   - name: repo
@@ -26,7 +25,6 @@ Identify confirmed breaking changes merged since the last breaking version. Focu
    # single command, no pipeline — the filtering and semver sort happen inside --jq
    gh api repos/:owner/:repo/git/refs/tags \
      --jq '[.[].ref | sub("refs/tags/"; "") | select(test("^[0-9]+\\.[0-9]+\\.[0-9]+$"))] | sort_by(split(".") | map(tonumber)) | .[]'
-   # or locally: git tag --list --sort=v:refname '[0-9]*.[0-9]*.[0-9]*'
    ```
 2. **Identify the last breaking version** — the first tag of the current major series (e.g. `1.0.1` for the `1.x.x` series); a major bump = a breaking change.
 3. **Get its commit date**

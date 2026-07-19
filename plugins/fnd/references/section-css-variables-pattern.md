@@ -159,7 +159,7 @@ Add a comment at the top of the block file listing all CSS-variable-based classe
 
 ### 4. Applying Classes
 
-For blocks with a wrapper element (like `core-image`), apply `ratio_classes` to the wrapper `<div>`:
+Apply `ratio_classes` to the block's wrapper `<div>` (like `core-image`):
 
 ```liquid
 <div class='{{ ratio_classes }} overflow-hidden'>
@@ -167,54 +167,22 @@ For blocks with a wrapper element (like `core-image`), apply `ratio_classes` to 
 </div>
 ```
 
-For blocks that pass a `class` to a child snippet (like `core-video` → `deferred-media`), build the full `class` string:
-
-```liquid
-if use_section_vars assign class = 'relative w-full overflow-hidden
-aspect-(--block-aspect-ratio-mobile,auto) md:aspect-(--block-aspect-ratio,auto)
-h-(--block-height-mobile,auto) md:h-(--block-height,auto)' else assign class =
-'relative w-full ' | append: ratio_classes endif
-```
+Variant: blocks with no wrapper of their own (like `core-video` → `deferred-media`) build the same
+variable classes into the full `class` string passed to the child snippet instead — still complete
+literals per branch, never concatenated.
 
 ## Translations
 
-Add these keys to `locales/en.default.schema.json`:
-
-```json
-{
-  "content": {
-    "use_section_vars": "Use Section Variables",
-    "aspect_ratio": "Aspect Ratio",
-    "aspect_ratio_mobile": "Mobile Aspect Ratio"
-  },
-  "info": {
-    "use_section_vars": "Inherit aspect-ratio and height from the parent section via CSS variables. Useful when the section controls media dimensions (e.g. Hero Banner)."
-  }
-}
-```
+`locales/en.default.schema.json` needs `content.use_section_vars` ("Use Section Variables"),
+`info.use_section_vars`, and `content.*` labels for any new settings (e.g. `aspect_ratio`,
+`aspect_ratio_mobile`).
 
 ## Adding a New CSS Variable Property
 
-To extend this pattern with a new property (e.g. `max-width`):
-
-1. **Section**: add setting, compute the CSS variable (plus its `-mobile` counterpart when the value differs per breakpoint), append to `custom_style`
-
-   ```liquid
-   assign section_style = section_style | append: ' --block-max-width: ' |
-   append: value | append: ';'
-   ```
-
-2. **Block**: add the Tailwind class in the `use_section_vars` branch
-
-   ```liquid
-   assign ratio_classes = ratio_classes | append: '
-   max-w-(--block-max-width-mobile,none) md:max-w-(--block-max-width,none)'
-   ```
-
-3. **Safelist**: add the new classes to the safelist comment
-   ```
-   max-w-(--block-max-width-mobile,none) md:max-w-(--block-max-width,none)
-   ```
+Same pattern, three touchpoints — e.g. for `max-width`: **section** adds the setting and appends
+`--block-max-width` to `custom_style` (plus a `-mobile` counterpart when the value differs per
+breakpoint); **block** adds `max-w-(--block-max-width-mobile,none) md:max-w-(--block-max-width,none)`
+in the `use_section_vars` branch; **safelist** comment gets the same classes.
 
 ## Reference Implementation
 

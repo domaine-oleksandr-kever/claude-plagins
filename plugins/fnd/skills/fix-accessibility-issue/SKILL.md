@@ -1,10 +1,9 @@
 ---
 name: fix-accessibility-issue
 description: >
-  Analyze and fix accessibility issues in theme components, following the standard issue-fix workflow
-  with a11y-specific ARIA, focus-management, and screen-reader considerations. Use when the user asks
-  to fix an accessibility / a11y / ARIA / keyboard / screen-reader / focus issue in a component, or
-  references a GitHub accessibility issue, or invokes /fix-accessibility-issue.
+  Fix accessibility issues in theme components (ARIA, focus management, screen readers).
+  Use when the user asks to fix an accessibility / a11y / ARIA / keyboard / screen-reader /
+  focus issue, or references a GitHub accessibility issue.
 argument-hint: "<component-name | GitHub issue #>"
 arguments:
   - name: target
@@ -18,9 +17,7 @@ Fix accessibility issues in theme components. Follow the standard issue-fix work
 
 ## Component ARIA patterns
 
-Before implementing, **search the codebase for the existing ARIA pattern** for the component type (`Grep` for `role=`, `aria-*`, and the component name) — match it first, and reach for the **WCAG ARIA Authoring Practices (APG)** pattern only when there's no precedent. Common component types in this theme:
-
-`accordion · breadcrumb · carousel/slider · cart-drawer · color-swatch · combobox/dropdown · disclosure · dropdown-navigation · modal/dialog · product-card · product-filter · sale-price · switch · tab · tooltip`
+Before implementing, **search the codebase for the existing ARIA pattern** for the component type (`Grep` for `role=`, `aria-*`, and the component name) — match it first, and reach for the **WCAG ARIA Authoring Practices (APG)** pattern only when there's no precedent.
 
 ## Critical implementation rules
 

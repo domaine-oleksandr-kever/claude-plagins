@@ -108,13 +108,7 @@ The cost is **reading the changed files**, which checks A and C (and E) share. S
   and the documented ceilings (`ceiling:` entries from the task workspace `notes.md`)
   when a workspace exists.
 
-- **Emphasis by caller:**
-  - `pre-commit-review` → `hygiene` (lead A + C) **+ correctness** — the primary home of
-    check F.
-  - `create-pull-request` → `conformance` (lead E; `protected-core` = blocker) **+
-    correctness backstop** — run `bug-hunter` only when `correctness_hash` is absent or
-    ≠ the current diff hash (the developer skipped `pre-commit-review`, or the diff moved
-    since).
+- **Emphasis by caller** — assigned per skill in §3 → Per-skill entry behaviour.
 
 Merge the agent findings with the inline B/D hits into one plan/table for the developer.
 
@@ -158,18 +152,19 @@ When asking (subsequent runs), enrich the prompt so the decision is easy:
 
 ### Per-skill entry behaviour
 
-- **`pre-commit-review`** — the primary home of the full review, **including check F**
-  (`bug-hunter` in parallel with the `change-reviewer`(s) when the correctness gate
-  holds). Applies edits after developer approval, then writes/refreshes the marker
-  (incl. `correctness_hash`).
+- **`pre-commit-review`** — emphasis `hygiene` (lead A + C); the primary home of the full
+  review, **including check F** (`bug-hunter` in parallel with the `change-reviewer`(s)
+  when the correctness gate holds). Applies edits after developer approval, then
+  writes/refreshes the marker (incl. `correctness_hash`).
 - **`commit`** — does **not** itself run the hygiene review. On entry: if
   `reviewed_before == no`, offer to run `/fnd:pre-commit-review` first (proceed if the dev
   declines); if `yes`, continue to the commit. (Its own untracked-file check still runs.)
-- **`create-pull-request`** — final gate. Run the flow with **`conformance`** emphasis:
-  first time on branch → full; else ask. Independently of that choice, check the
-  **correctness backstop**: `correctness_hash` absent or stale → apply the gate and run
-  `bug-hunter` before drafting. **Any `protected-core` blocker or blocking correctness
-  finding stops the PR** until resolved or explicitly waived by the developer.
+- **`create-pull-request`** — final gate; emphasis **`conformance`** (lead E;
+  `protected-core` = blocker): first time on branch → full; else ask. Independently of
+  that choice, the **correctness backstop**: `correctness_hash` absent or ≠ the current
+  diff hash → apply the gate and run `bug-hunter` before drafting. **Any `protected-core`
+  blocker or blocking correctness finding stops the PR** until resolved or explicitly
+  waived by the developer.
 
 > Optional fast-path: a skill may also print an in-context sentinel
 > (`✓ fnd review · branch=… · <hash>`), but the `.git/` marker is the source of truth.

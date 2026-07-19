@@ -48,7 +48,8 @@ sentences where they read cleaner (e.g. "PDP only — cart/checkout → ELC-303.
    `#### Summary`. The ticket key/links live in Jira already; reference related tickets **inline**
    as external links where they matter (e.g. in Summary / Dependencies).
 4. **Content style — terse and scannable:**
-   - **Summary** is 1–2 dense paragraphs. Every other section is **bullets** (Files is the exception, below).
+   - **Summary** is 1–2 dense paragraphs. Every other section is tight **bullets** (Files is the
+     exception, below) — never long prose.
    - **Inline code** (`` `backticks` ``) for every file path, object, setting, selector, input name.
    - **Bold** for key terms and inline sub-labels (`**Liquid:**`, `**Form:**`, `**Block settings**`,
      `**New:**`, `**Modified:**`).
@@ -58,7 +59,8 @@ sentences where they read cleaner (e.g. "PDP only — cart/checkout → ELC-303.
    links render as plain text. Reference in-repo files/folders/rules with **inline code only**.
    **External** links are fine — other Jira tickets, Figma, public Shopify / Domaine docs.
 6. **Scope discipline:** describe **how**, not **what** or **how to verify** — AC and Steps to test
-   live in Jira, not here. Net-new apps / app embeds / scripts go under **Dependencies**.
+   live in Jira, not here. Net-new apps / app embeds / scripts go under **Dependencies** — never
+   the Shopify platform, CDN, theme editor, or already-installed apps (net-new prerequisites only).
 7. **Jira parity:** the markdown file is the review source of truth; converted to ADF
    (`${CLAUDE_PLUGIN_ROOT}/scripts/md-to-adf.cjs`) it must paste in as the same seven H4 sections.
 8. **Client confidentiality:** this repo is client-facing — never reference tickets, projects, repos,
@@ -117,14 +119,6 @@ block"). Link related tickets inline where relevant.>
 ## Worked reference (abridged, from ELC-126)
 
 ```markdown
-#### Summary
-
-Build a **theme-owned subscription selector** on PDP — not the Shopify Subscriptions app block.
-One-time vs subscribe radios, allocation pricing, info tooltip. Hidden `selling_plan` on the product
-form; empty = one-time. Default = one-time; subscribe defaults to **4 months** when that plan exists
-on the active SKU, else first allocation. On flattened parents ([ELC-70](url)) selling plans live on
-**child SKUs** — read allocations from the hydrated child; re-render via SRA on child change.
-
 #### Data / Config
 
 - **Liquid:** `variant.selling_plan_allocations` on the active variant; hide when none.
@@ -136,22 +130,6 @@ on the active SKU, else first allocation. On flattened parents ([ELC-70](url)) s
 **New:** `snippets/product--main__subscription-selector.liquid` · `src/entry/subscription-selector.ts`
 **Modified:** `sections/main-product.liquid` · `snippets/product--main.liquid` · locales · `templates/product.json`
 ```
-
----
-
-## Anti-patterns to avoid
-
-- **Long prose** — only Summary is paragraphs; everything else is tight bullets.
-- **Scope that doesn't trace to the AC** — map every bullet to a requirement, assumption, or repo
-  constraint, or cut it / move it to Assumptions.
-- **Embedding AC / steps-to-test** — the TA is *how*, not *what* / *how to verify*; those stay in Jira.
-- **Renaming / numbering / reordering** the seven sections, or adding a title/metadata block.
-- **Internal repo file links** — inline code for in-repo paths; markdown links only for external destinations.
-- **Tutorial explanations / generic validation boilerplate** — assume senior-dev baseline.
-- **Listing the Shopify platform, CDN, theme editor, or already-installed apps** under Dependencies —
-  that section is for net-new prerequisites only.
-- **AI-speak** — write like a dev, not a copywriter.
-- **Cross-client references** — never cite other client accounts' tickets, repos, or Figma.
 
 ---
 

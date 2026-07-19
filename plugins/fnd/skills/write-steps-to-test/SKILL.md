@@ -1,11 +1,10 @@
 ---
 name: write-steps-to-test
 description: >
-  Produce Steps to Test for a Jira ticket in Domaine's standard format — Workflow 5 of the Agentic
-  Assisted Development series. Ingests the ticket + implementation context, maps each AC to test
-  scenarios, and writes reproducible steps for a tester unfamiliar with the implementation; updates
-  the Jira Steps to Test field after approval. Use when the user asks to write / draft Steps to Test
-  or QA steps for a Jira ticket, or invokes /write-steps-to-test.
+  Write Steps to Test for a Jira ticket in Domaine's standard format — maps each AC to
+  reproducible scenarios for a tester unfamiliar with the implementation; updates the Jira
+  field after approval — Workflow 5. Use when the user asks to write / draft Steps to Test or
+  QA steps for a Jira ticket.
 argument-hint: "<jira-url-or-key> [feature|bug]"
 arguments:
   - name: jira_ticket
@@ -18,21 +17,18 @@ arguments:
 
 Produce **Steps to Test** in Domaine's standard format.
 
-Series position: Workflow 5 — for QA handoff, typically alongside / after `qa-feature-or-fix`.
-Inputs (ask if missing): **Jira ticket URL or key** (`jira_ticket`); **feature or bug** (`ticket_type` — the template may differ).
 Operating mode: **Phase 1 in plan mode** (ingest ticket + implementation context); Phase 2 drafts the steps and optionally updates Jira.
 
 ## Global rules
 
 - Read the ticket via the **`jira-reader` subagent** (Atlassian MCP) — AC, TA, links, attachments; the optional write-back (Phase 2) stays in the main loop.
 - **Never proceed past the ✋ checkpoint** without explicit developer confirmation.
-- Output follows the Domaine format — `${CLAUDE_PLUGIN_ROOT}/references/steps-to-test-format.md`: usable by a tester **unfamiliar** with the implementation, on their **OWN** theme (**never a preview-theme link**), deterministic expectations.
 
 ---
 
 ## Phase 1 — Analysis `[plan mode]`
 
-1. **Ingest the ticket** — context-first: full (not summarized) in-conversation fields count; second stop the task workspace `.claude/fnd/<TICKET>/` if fresh (it also holds QA repro values in `notes.md`); otherwise delegate to the **`jira-reader`** subagent and **save its output to the workspace**. This skill needs: Description, AC, Technical Approach, Steps to Test, Figma links, environment notes (plus `figma_urls` / `notion_urls` / `other_links`). `needs_clarification` → ask. **Read the linked docs** that define expected behaviour/data/copy per `${CLAUDE_PLUGIN_ROOT}/references/reading-linked-docs.md` — reuse before fetching (in-conversation or fresh workspace `doc-<slug>.md` copies count; save fresh extracts back); if the Notion MCP isn't connected, tell the developer rather than writing steps blind.
+1. **Ingest the ticket** — context-first per `${CLAUDE_PLUGIN_ROOT}/references/task-workspace.md`; the workspace `.claude/fnd/<TICKET>/` also holds QA repro values in `notes.md`. This skill needs: Description, AC, Technical Approach, Steps to Test, Figma links, environment notes (plus `figma_urls` / `notion_urls` / `other_links`). `needs_clarification` → ask. **Read the linked docs** that define expected behaviour/data/copy per `${CLAUDE_PLUGIN_ROOT}/references/reading-linked-docs.md`; if the Notion MCP isn't connected, tell the developer rather than writing steps blind.
 2. **Analyse the implementation** — from the diff or developer summary: what shipped, which settings/metafields/templates matter, and merchant-visible paths (Online Store editor, templates, URLs).
 3. **Identify test scenarios** — map each AC to one or more scenarios; include edge cases, negative paths, and data/setup prerequisites (collections, tags, markets, customer state, inventory, etc.).
 
@@ -50,7 +46,7 @@ Operating mode: **Phase 1 in plan mode** (ingest ticket + implementation context
 
 Present the Steps to Test. Encourage the developer to **walk through** them (mentally or on preview) to catch gaps. Once approved, save them to the workspace `steps-to-test.md` (`${CLAUDE_PLUGIN_ROOT}/references/task-workspace.md`) before the Jira write-back.
 
-2. **Update Jira** (only after approval) — ask **manual update** vs **Atlassian MCP**. Place content in the **Steps to Test** custom field per process — not only comments. The field is rich-text (ADF): write the approved markdown to a temp file, run `node ${CLAUDE_PLUGIN_ROOT}/scripts/md-to-adf.cjs --no-tables <that-file>`, then `editJiraIssue` with `fields: { "<Steps to test field id>": <the ADF JSON> }`. All conversion rules (never raw markdown into a custom field, keep the ADF compact, size warning → trim/restructure): **`${CLAUDE_PLUGIN_ROOT}/references/jira-custom-fields.md` → Use the converter / Keep the ADF compact**.
+2. **Update Jira** (only after approval) — ask **manual update** vs **Atlassian MCP**. Place content in the **Steps to Test** custom field per process — not only comments. The field is rich-text (ADF): write the approved markdown to a temp file, run `node ${CLAUDE_PLUGIN_ROOT}/scripts/md-to-adf.cjs --no-tables <that-file>`, then `editJiraIssue` with `fields: { "<Steps to test field id>": <the ADF JSON> }`. Conversion rules: **`${CLAUDE_PLUGIN_ROOT}/references/jira-adf-write.md`**.
 
 ## Quality bar
 

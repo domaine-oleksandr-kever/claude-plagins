@@ -1,15 +1,12 @@
 ---
 name: ship
 description: >
-  Autonomous end-to-end delivery of a ready Jira ticket — the auto-mode alternative to
-  running workflows 3–6 solo. One upfront interview + a single plan/QA-checklist approval,
-  then: implement → QA (state-variant matrix + break-it + adversarial bug hunt) →
-  finalize (review + commit) →
-  PR + preview theme → Steps to Test → PR aftercare (CI checks + review bots) → Jira
-  hand-off comment, escalating only per an explicit blocker contract. Requires a ticket
-  with Description, AC, an approved Technical Approach, and a Figma node. Use when the
-  user asks to ship a ticket end-to-end, run the pipeline / auto mode / autopilot on a
-  ticket, or invokes /ship.
+  Autonomous end-to-end delivery of a ready Jira ticket (the auto-mode alternative to
+  workflows 3–6): one upfront interview + one plan/QA-checklist approval, then implement →
+  QA → finalize → PR + preview theme → Steps to Test → PR aftercare → Jira hand-off,
+  escalating only per the blocker contract. Requires Description, AC, approved TA, Figma
+  node. Use when the user asks to ship a ticket end-to-end or run the pipeline / auto mode /
+  autopilot on a ticket.
 argument-hint: "<jira-url-or-key> [figma-node-url]"
 arguments:
   - name: jira_ticket
@@ -56,31 +53,28 @@ writes are the workspace cache and `pipeline.md`); Step 4 autonomous.
 
 1. **Resume?** Workspace `pipeline.md` with `status: active` **and** the ✋ artifacts on
    disk (`plan.md` + `qa.md` — `active` without them is a half-written record: treat as
-   `draft`) → reconcile against ground truth per `pipeline-mode.md` (progress ticks,
-   `git log`, `gh pr view`, Jira fields), re-run items 2–6 below compactly (a resume
-   often lands in a new terminal — dead dev server, missing allowlist: exactly what
-   items 3–4 exist to catch), then continue from the first genuinely-undone
-   phase (jump to Step 4). `status: draft` — interviewed, never approved: keep the
-   recorded answers, redo Steps 1–3 compactly from the workspace cache and re-present
-   the ✋ — approval never comes from a resume. `done` / `aborted` / absent → fresh run.
+   `draft`) → reconcile the phase ledger against ground truth per `pipeline-mode.md` →
+   Decision record, re-run items 2–6 below compactly (a resume often lands in a new
+   terminal), then continue from the first genuinely-undone phase (jump to Step 4).
+   `status: draft` — interviewed, never approved: keep the recorded answers, redo
+   Steps 1–3 compactly from the workspace cache and re-present the ✋ — approval never
+   comes from a resume. `done` / `aborted` / absent → fresh run.
 2. **Fresh context.** If the context monitor flagged this prompt (its notice
    recommends `/compact`), recommend the stronger option — `/clear` + rerunning
    `/fnd:ship <ticket>`; proceed only if the developer insists.
-3. **Environment** (the `preflight-checks` scope, inline and compact): Atlassian MCP up;
-   Figma MCP when designs are involved; Chrome DevTools MCP + the local dev server
-   (`${CLAUDE_PLUGIN_ROOT}/references/preflight-checklist.md`); `gh auth status`;
-   Shopify CLI present; **store access** — one cheap read through
-   `${CLAUDE_PLUGIN_ROOT}/scripts/shopify-admin-gql.sh` (e.g. shop name; the probe's
-   `.graphql` file goes to scratch — the workspace doesn't exist until item 5), then
-   **classify the level**: read failed → `none`; read ok → probe the write scope
-   (`currentAppInstallation { accessScopes }` via the same runner — a `write_*` scope
-   present → `full`; scopes unreadable or read-only scopes → `read-only`; never infer
-   `full` from a working read). `error=` is
-   **not** a stop: record the level (`theme-json.sh`
-   still works via the Theme Access token) plus the exact fix the runner prints; Step 2
-   turns it into a question — apply the fix, or run data work in **Mode 2**
-   (`metafield-metaobject-setup.md`). What kills runs is discovering a dead runner — or
-   a wrong write-access guess (ACCESS_DENIED) — mid-run: classify it here.
+3. **Environment** (the `preflight-checks` scope, inline and compact — classify here,
+   not mid-run): Atlassian MCP up; Figma MCP when designs are involved; Chrome DevTools
+   MCP; the **local dev server** running (`npm run dev` — Turbo: `shopify theme dev -e dev`
+   + Vite — or `npm run theme:shopify`); not running → ask the developer to start it —
+   a long-lived interactive process the developer owns; never start or kill it yourself;
+   `gh auth status`; Shopify CLI present; **store access** — one cheap read through
+   `${CLAUDE_PLUGIN_ROOT}/scripts/shopify-admin-gql.sh` (probe `.graphql` → scratch),
+   then classify: read failed → `none`; read ok → probe
+   `currentAppInstallation { accessScopes }` — a `write_*` scope present → `full`, else
+   `read-only` (never infer `full` from a working read). `error=` is **not** a stop:
+   record the level (`theme-json.sh` still works via the Theme Access token) plus the
+   exact fix the runner prints; Step 2 turns it into a question — apply the fix, or run
+   data work in **Mode 2** (`metafield-metaobject-setup.md`).
 4. **Permissions.** List the side-effect commands this run will execute — `git commit`,
    `git push`, `gh pr create`, `gh pr checks` (the `--watch` loop), `gh api` (aftercare
    thread polling **and** the `graphql` `resolveReviewThread` mutation), `gh pr ready`
@@ -106,14 +100,15 @@ tell the developer if that MCP is missing). Then **validate readiness**: Descrip
 approved **Technical Approach**, Figma node — any missing → **stop** and point at the gap
 (`/fnd:write-technical-approach` for a missing TA). If the ticket/docs define metafields
 or metaobjects, plan the provisioning per
-`${CLAUDE_PLUGIN_ROOT}/references/metafield-metaobject-setup.md` (mode 1 vs 2). Read the
+`${CLAUDE_PLUGIN_ROOT}/references/metafield-metaobject-setup.md` → **Planning & QA
+digest** (the file's first ~45 lines — read only that; the rest is implement-phase
+material). Read the
 load-bearing files `theme-explorer` points to yourself — the plan is built from real
 understanding, not the scout's summary.
 
-**Store-data audit** — the classic mid-run killer is discovering during QA that no
-product on the dev store carries the data the feature needs. From the ticket + TA + the
-theme code the change touches, list every store-data dependency needed to **build and to
-QA**: metafield/metaobject definitions AND actual values, selling plan groups
+**Store-data audit** — from the ticket + TA + the theme code the change touches, list
+every store-data dependency needed to **build and to QA**: metafield/metaobject
+definitions AND actual values, selling plan groups
 (subscriptions), bundle configuration, target products/collections/pages, template
 assignments, app-owned records. Probe each with read-only queries via
 `${CLAUDE_PLUGIN_ROOT}/scripts/shopify-admin-gql.sh` — targeted queries, not a full
@@ -139,28 +134,30 @@ recommended answer. Explore the codebase instead of asking whenever the code can
   data (say on which product and with what values; the default when **write** access
   exists — on a read-only store recommend existing data or Mode 2 instead, and name the
   break-it mutation rows that will report `not-executable: access` per `break-it-qa.md`
-  so the ✋ checklist shows them upfront; provisioning and cleanup per
-  `metafield-metaobject-setup.md` → Verifying data-driven AC) vs the developer points at existing data
+  so the ✋ checklist shows them upfront; provisioning per
+  `metafield-metaobject-setup.md` → Planning & QA digest) vs the developer points at existing data
   (product/URL — e.g. "subscriptions live on /products/lip-pencil") vs **Mode 2**: you
   prepare the queries/mutations as the living `.graphql` file and the whole exchange —
   the developer runs each step in the GraphiQL App and pastes the returned ids back —
   **completes before the ✋** (the data must exist when Step 4 starts; the autonomous
   run can't pause for manual execution) vs static-only validation for those
   QA rows (named in the checklist, never silently skipped).
+  **AC touching a logged-in customer, checkout, or account pages** can't run on the
+  local dev server — decide here: mark those rows `preview-theme` (the qa phase builds
+  the `[ELC-…]` preview theme and tests them on its preview URL) or
+  `not-executable: access`; never simulate a logged-in state locally.
 - **Policy set:** working branch (stay vs create + name) and PR target branch (default
   `develop`); commit scope (ticket key?); preview theme (auto-create `--reuse` vs manual
-  triplet) + storefront path for deep-links; PR **end state — draft vs ready** (default
-  and recommended answer: `draft`; the PR is always *created* ready-for-review: review
-  bots skip drafts; `draft` means aftercare flips it back once the bot rounds are done —
-  so the developer looks at a bot-reviewed PR before it reads as ready); Jira write-backs via
+  triplet) + storefront path for deep-links; PR **end state — draft vs ready**
+  (recommend `draft`; the PR is always *created* ready so review bots see it — aftercare
+  applies the end state last, phase 6); Jira write-backs via
   MCP — Steps to Test field / PR link / hand-off comment (each yes/no); PR bots to await
   (names — before recommending "none", probe recent repo PRs for bot reviewers via
   `gh api`) + timebox in minutes; deep-research pressure-test of the plan (default no).
   QA depth is **not** a question (`break-it-qa.md` → No reduced mode — that rule's
   single home).
 
-Write `pipeline.md` per `pipeline-mode.md` (`status: draft` — the ✋ approval, not the
-interview, is what arms it; caps, the phase list).
+Write `pipeline.md` per `pipeline-mode.md` (`status: draft`; caps, the phase list).
 
 ## Step 3 — Contract ✋ (the only gate)
 
@@ -174,8 +171,8 @@ Draft **two artifacts** and present them together:
   metafield/metaobject when both exist); every data-driven row names its **QA target**
   (product/entity handle) from the store-data audit — rows resolved as static-only are
   marked so; break-it rows per
-  `${CLAUDE_PLUGIN_ROOT}/references/break-it-qa.md` (its No-reduced-mode rule governs;
-  on a read-only store mutation rows carry `not-executable: access`); design
+  `${CLAUDE_PLUGIN_ROOT}/references/break-it-qa.md` (its rules govern — No reduced
+  mode, `not-executable: access`); design
   conformance vs the Figma
   specs; accessibility; performance; viewport & cross-browser — the same dimensions
   solo QA covers.
@@ -223,7 +220,11 @@ row, and relays any `ESCALATE` via AskUserQuestion → appends the answer to `pi
    missed → ESCALATE, don't improvise; state walks through
    `${CLAUDE_PLUGIN_ROOT}/scripts/shopify-admin-gql.sh` /
    `${CLAUDE_PLUGIN_ROOT}/scripts/theme-json.sh` (snapshot → mutate → verify →
-   **restore**); evidence per row; append the pass/fail report + findings with exact
+   **restore**); rows marked `preview-theme` (logged-in customer / checkout / account
+   pages) → first build the `[ELC-…]` preview theme
+   (`${CLAUDE_PLUGIN_ROOT}/scripts/create-preview-theme.sh create --name "<name>" --reuse`,
+   id + links → `notes.md`) and run them against its preview URL — never simulate a
+   logged-in state on the dev server; evidence per row; append the pass/fail report + findings with exact
    repro values to `qa.md`, blocking vs non-blocking. Merge the `bug-hunter` findings
    into the same triage — every one **dispositioned** (fix / justify → `ceiling:` entry +
    PR body / ESCALATE), never dropped.
@@ -245,26 +246,26 @@ row, and relays any `ESCALATE` via AskUserQuestion → appends the answer to `pi
    per `${CLAUDE_PLUGIN_ROOT}/references/commit-message-format.md` (scope per policy;
    body from plan + notes), then push the working branch. Tick **both**
    `pre-commit-review` and `commit` rows.
-4. **create-pr** — inline (glue). Preview theme per policy: manual triplet → use as-is;
-   else follow `${CLAUDE_PLUGIN_ROOT}/skills/create-pull-request/REFERENCE.md` →
-   Preview theme (`[ELC-…]` naming,
-   `--reuse`; `error=build_failed` → ESCALATE with the build output;
-   `error=settings_drift` → the reference's manual recovery). Conformance pass:
-   `change-reviewer` with `conformance` emphasis — a `protected-core` blocker →
-   ESCALATE. Body per `${CLAUDE_PLUGIN_ROOT}/skills/create-pull-request/REFERENCE.md`
-   (Summary → Jira ticket(s) →
-   theme-preview table in the top third; title `[ELC-XX][Type] …`; named ceilings from
-   the `notes.md` `ceiling:` entries → Dependencies).
-   `gh pr create --base <target> --body-file <tmp>` — **never `--draft`**; the
-   end-state policy is aftercare's to apply (rationale lives in Step 2's policy set).
-   **The moment the PR exists: record its URL to `progress.md` + `notes.md` and tick
-   the `create-pull-request` row** — this phase is inline, no agent brief ticks it
-   for you.
+4. **create-pr** — agent. Brief: the policy answers (preview theme / target branch /
+   storefront path), the `notes.md` `ceiling:` entries (+ the preview-theme id if qa
+   already created it), and
+   `${CLAUDE_PLUGIN_ROOT}/skills/create-pull-request/REFERENCE.md` — it owns the title
+   convention, the body order (Summary → Jira → theme-preview table in the top third;
+   ceilings → Dependencies) and the preview-theme decision flow (`[ELC-…]` naming,
+   `--reuse`). Escalations, verbatim in the brief: `error=build_failed` → ESCALATE with
+   the build output; `error=settings_drift` → the reference's manual recovery;
+   conformance pass (`change-reviewer`, `conformance` emphasis) — a `protected-core`
+   blocker → ESCALATE. `gh pr create --base <target> --body-file <tmp>` — **never
+   `--draft`** (the end state is aftercare's to apply). **Crash-safe, verbatim in the
+   brief: the moment the PR exists, record its URL to `progress.md` + `notes.md` and
+   tick the `create-pull-request` row — before any remaining work.** Return: PR URL,
+   theme id + preview/editor links, ≤10-line report. The conductor verifies the tick
+   and the recorded URL before advancing.
 5. **steps-to-test** — agent; fills the bot wait. Write per
    `${CLAUDE_PLUGIN_ROOT}/references/steps-to-test-format.md` from the AC + `qa.md` +
    `notes.md` repro values; save `steps-to-test.md`; policy allows → write the field via
    `node ${CLAUDE_PLUGIN_ROOT}/scripts/md-to-adf.cjs --no-tables` + `editJiraIssue`
-   (`${CLAUDE_PLUGIN_ROOT}/references/jira-custom-fields.md`).
+   (`${CLAUDE_PLUGIN_ROOT}/references/jira-adf-write.md`).
 6. **aftercare** — `gh pr checks --watch`; a failing check → diagnose → fix agent →
    commit + push (counts toward the aftercare-rounds cap). Then poll the policy bots' review threads via
    `gh api` (~90 s interval, up to the timebox). Per finding: triage vs AC/TA —

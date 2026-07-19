@@ -1,11 +1,10 @@
 ---
 name: update-schema-translations
 description: >
-  Translate English strings in theme schema locale files (`locales/*.schema.json`, the
-  admin/customizer labels) into all the theme's other languages, by building a translation-data file
-  and running the repo's translation script with the `--schema` flag. Use when the user asks to
-  translate / localize schema, settings, or theme-editor labels, or invokes /update-schema-translations.
-  For storefront copy use update-translations.
+  Translate English strings in theme schema locale files (`locales/*.schema.json`,
+  admin/customizer labels) into the theme's other languages. Use when the user asks to
+  translate / localize schema, settings, or theme-editor labels. For storefront copy use
+  update-translations.
 argument-hint: "(describe the English schema keys/strings to translate)"
 arguments:
   - name: strings

@@ -10,6 +10,32 @@ dependency order, mock content, and bind it to a test product so the feature can
 Admin GraphQL API (pin the version the repo targets, e.g. `2026-04`). Every mutation must select
 `userErrors { field message code }` and the created `id`.
 
+## Planning & QA digest
+
+Planners (ship Step 1 / interview, `write-technical-approach`) read **only this section**
+— the rest of the file (step skeleton, Mode-2 living-file protocol, engine internals) is
+implement-phase material. QA executors additionally read → Verifying data-driven
+Acceptance Criteria.
+
+- **Two modes.** Mode 1 — store API access exists (CLI ≥ 4.x `shopify store auth`, or an
+  Admin API token): inspection and mutations run via `scripts/shopify-admin-gql.sh`.
+  Mode 2 — no access: a living `.graphql` file the developer runs step-by-step in the
+  Shopify GraphiQL App; in an autonomous run that exchange must **complete before the ✋
+  gate** (the run can't pause for manual steps).
+- **Access is classified, never assumed:** `read_*`-only scopes → inspection works fully,
+  mutations go to the developer (Mode 2); a confirmed `write_*` scope → Mode 1 mutations.
+  Never infer write access from a working read; never request `write_*` scopes the
+  developer didn't sign off.
+- **STEP 0 — inspect before creating:** query the existing metaobject/metafield
+  definitions, diff against the doc's data model, plan create/wire/mock/bind only for
+  the gap.
+- **Verify contract (data-driven AC):** snapshot → mutate → reload → verify (**DOM, not
+  the visual**) → **restore**; walk every enumerated/optional/conditional value an AC
+  names; mind **propagation lag** — re-query after mutating, retry briefly before calling
+  a bug.
+- **TA carries the model:** Data / Config names the definitions (types, keys, field list,
+  owner/namespace) and may embed the STEP 0 query.
+
 ## Two modes
 
 Pick based on whether you have **store API access** (either kind — see **Store access** below):
