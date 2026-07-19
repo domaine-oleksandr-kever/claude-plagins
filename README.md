@@ -368,6 +368,22 @@ hook error never blocks work:
   warn threshold in % (default 40), `FND_CTX_WINDOW` overrides the assumed window size
   (e.g. for 1M-token sessions).
 
+### Environment switches
+
+Single home for every knob the plugin reads. Set them in Claude Code settings —
+`~/.claude/settings.json` → `"env": { … }` for all your projects, or a project's
+`.claude/settings.json` for just that repo. Hooks inherit Claude Code's process
+environment; they do **not** read a project's `.env` file. Every new switch must be
+added to this table.
+
+| Variable | Default | Effect |
+|---|---|---|
+| `FND_LEAN` | `1` | `0` disables the lean-code session convention |
+| `FND_CTX_MONITOR` | `1` | `0` disables the context-usage monitor |
+| `FND_CTX_WARN` | `40` | context warn threshold, % of the window |
+| `FND_CTX_WINDOW` | auto | override the assumed context window size (tokens) |
+| `SHOPIFY_ADMIN_GQL_QUIET` | off | non-`0` value shortens the gql runner's engine-fallback note to `note=engine=token` |
+
 ## Lean-code convention
 
 A session-start hook injects `hooks/lean-code.md` — a "lazy senior developer" discipline

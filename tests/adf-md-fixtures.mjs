@@ -190,6 +190,40 @@ check('m2a-blocks', m2a('# H1\n\n> quoted\n\n---'), doc([
   { type: 'rule' },
 ]));
 
+// mentions and emoji render as their display text, never vanish
+check('a2m-mention-emoji', a2m(doc([p([
+  t('ping '),
+  { type: 'mention', attrs: { id: '5b10a', text: '@Oleksandr' } },
+  t(' '),
+  { type: 'emoji', attrs: { shortName: ':tada:' } },
+])])), 'ping @Oleksandr :tada:');
+
+// unknown block node (panel) degrades to its children — text survives, chrome is lost
+check('a2m-unknown-panel', a2m(doc([
+  { type: 'panel', attrs: { panelType: 'info' }, content: [p([t('heads-up text')])] },
+])), 'heads-up text');
+
+// blockCard at block level with a JSON-LD payload — URL comes from attrs.data['@id']
+check('a2m-blockcard-jsonld', a2m(doc([
+  { type: 'blockCard', attrs: { data: { '@id': 'https://c.test/page' } } },
+])), '<https://c.test/page>');
+
+// --field extracts one field's ADF from a full getJiraIssue envelope (stdin)
+check('a2m-field-extract', run(A2M, JSON.stringify({
+  key: 'ELC-61',
+  fields: { summary: 'S', customfield_10038: doc([p([t('the approach')])]) },
+}), ['--field', 'customfield_10038']), 'the approach');
+
+// --field on a plain-string field passes the string through untouched
+check('a2m-field-string', run(A2M, JSON.stringify({
+  fields: { customfield_10040: 'already markdown' },
+}), ['--field', 'customfield_10040']), 'already markdown');
+
+// ***bold-italic*** → strong + em on one text node
+check('m2a-strongem', m2a('a ***hot*** path'), doc([
+  p([t('a '), t('hot', [{ type: 'strong' }, { type: 'em' }]), t(' path')]),
+]));
+
 // round-trip: a nested-list AC survives md → adf → md
 check('roundtrip-nested', run(A2M, JSON.stringify(m2a('1. AC 1\n  - sub a\n  - sub b\n2. AC 2'))),
   '1. AC 1\n  - sub a\n  - sub b\n2. AC 2');
