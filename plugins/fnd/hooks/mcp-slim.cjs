@@ -49,7 +49,8 @@ function slimText(text, trace) {
   }
   if (res.error) return { text, modified: false, reason: 'error-shape', stages: [] }; // error shape: verbatim
   if (!res.wasModified || res.bytesOut >= res.bytesIn) {
-    return { text, modified: false, reason: res.reason || 'no-gain', stages: res.stages || [] };
+    // `format` rides along from slim()'s non-json branch (undefined otherwise) → the debug log (M8).
+    return { text, modified: false, reason: res.reason || 'no-gain', stages: res.stages || [], format: res.format };
   }
   return { text: res.output, modified: true, reason: null, stages: res.stages || [] };
 }
@@ -62,6 +63,7 @@ function slimBlocks(blocks, trace) {
   let modified = false;
   let markIndex = -1;
   let reason = null;
+  let format; // (M8) the format tag of the first non-modifying block — meaningful only when non-json
   const stages = [];
   const out = blocks.map((b, i) => {
     if (b && typeof b === 'object' && typeof b.text === 'string') {
@@ -72,11 +74,11 @@ function slimBlocks(blocks, trace) {
         for (const s of r.stages) if (!stages.includes(s)) stages.push(s);
         return { ...b, text: r.text };
       }
-      if (reason === null) reason = r.reason;
+      if (reason === null) { reason = r.reason; format = r.format; }
     }
     return b; // non-text or unchanged → untouched
   });
-  return { blocks: out, modified, markIndex, reason: modified ? null : (reason || 'no-gain'), stages };
+  return { blocks: out, modified, markIndex, reason: modified ? null : (reason || 'no-gain'), stages, format: modified ? undefined : format };
 }
 
 // Slim a tool result, mirroring its shape. Returns a descriptor for attachMarker (+ reason/stages
@@ -84,20 +86,20 @@ function slimBlocks(blocks, trace) {
 function slimResult(result, trace) {
   if (typeof result === 'string') {
     const r = slimText(result, trace);
-    return { value: r.text, modified: r.modified, kind: 'string', reason: r.reason, stages: r.stages };
+    return { value: r.text, modified: r.modified, kind: 'string', reason: r.reason, stages: r.stages, format: r.format };
   }
   if (Array.isArray(result)) {
     const r = slimBlocks(result, trace);
-    return { value: r.blocks, modified: r.modified, kind: 'array', markIndex: r.markIndex, reason: r.reason, stages: r.stages };
+    return { value: r.blocks, modified: r.modified, kind: 'array', markIndex: r.markIndex, reason: r.reason, stages: r.stages, format: r.format };
   }
   if (result && typeof result === 'object') {
     if (Array.isArray(result.content)) {
       const r = slimBlocks(result.content, trace);
-      return { value: { ...result, content: r.blocks }, modified: r.modified, kind: 'content', markIndex: r.markIndex, reason: r.reason, stages: r.stages };
+      return { value: { ...result, content: r.blocks }, modified: r.modified, kind: 'content', markIndex: r.markIndex, reason: r.reason, stages: r.stages, format: r.format };
     }
     if (typeof result.text === 'string') {
       const r = slimText(result.text, trace);
-      return { value: { ...result, text: r.text }, modified: r.modified, kind: 'single', reason: r.reason, stages: r.stages };
+      return { value: { ...result, text: r.text }, modified: r.modified, kind: 'single', reason: r.reason, stages: r.stages, format: r.format };
     }
   }
   return { value: result, modified: false, kind: 'none', reason: 'unrecognized-shape', stages: [] }; // unrecognized shape → no-op
@@ -147,10 +149,11 @@ function run(raw) {
 
   // One debug line per invocation (opt-in). Never touches stdout; the compressed path calls it
   // AFTER writing the result. `decision:"compressed"` iff we emitted updatedToolOutput.
-  const trace = (decision, reason, bytesIn, bytesOut, stages, spill) => {
+  const trace = (decision, reason, bytesIn, bytesOut, stages, spill, format) => {
     if (!dbg) return;
     debugLog({
       entry: 'hook', tool, decision, reason: reason || null,
+      ...(format ? { format } : {}), // M8: only the non-json passthrough carries a format tag
       bytes_in: bytesIn, bytes_out: bytesOut, pct: pctOf(bytesIn, bytesOut),
       stages: stages || [], spill: spill || null, ms: Date.now() - t0,
     });
@@ -176,7 +179,7 @@ function run(raw) {
   if (bytesIn <= GATE_BYTES) { trace('passthrough', 'size-gate', bytesIn, bytesIn, [], null); return; }
 
   const slimmed = slimResult(result, dbg); // dbg gates slim()'s per-stage `stages` bookkeeping
-  if (!slimmed.modified) { trace('passthrough', slimmed.reason || 'no-gain', bytesIn, bytesIn, [], null); return; } // no byte gain → passthrough
+  if (!slimmed.modified) { trace('passthrough', slimmed.reason || 'no-gain', bytesIn, bytesIn, [], null, slimmed.format); return; } // no byte gain → passthrough
 
   // Recovery net: spill the original before handing back a lossy result. No spill → passthrough.
   const fullPath = spillOriginal(serialized);

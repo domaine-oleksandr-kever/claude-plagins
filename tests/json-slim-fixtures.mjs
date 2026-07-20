@@ -349,5 +349,37 @@ eq('ttl-negative', J.spillTtlHours('-5'), 24); // a negative TTL must not become
   rmSync(dir, { recursive: true, force: true });
 }
 
+// ---------------------------------------------------------------- non-json format sniff (M8) --
+// slim()'s `format` tag classifies a NON-JSON payload for the FND_MCP_SLIM_DEBUG log — set ONLY on
+// the non-json branch (undefined on every compressing / error / success path). Fixed vocabulary:
+// html / xml / broken-json / text.
+eq('m8-format-xml', J.slim(readFileSync(path.join(FIX, 'figma-metadata-3326-39542.xml'), 'utf8')).format, 'xml');
+eq('m8-format-html', J.slim('<!DOCTYPE html><html><body>hi</body></html>').format, 'html');
+{
+  // A truncated ELC-104 prefix: starts with `{` yet is unparseable → the `broken-json` diagnostic.
+  const brokenPrefix = readFileSync(path.join(FIX, 'jira-issue-ELC-104.json'), 'utf8').slice(0, 200);
+  eq('m8-format-broken-json', J.slim(brokenPrefix).format, 'broken-json');
+}
+eq('m8-format-text', J.slim('plain prose, not markup at all').format, 'text');
+check('m8-format-absent-on-json', J.slim(JSON.stringify({ a: 1 })).format === undefined, 'a compressible JSON result must carry no format tag');
+check('m8-format-absent-on-error', J.slim(JSON.stringify({ errors: [{ message: 'boom' }] })).format === undefined, 'an error-shape result must carry no format tag');
+
+// `project` on EVERY debug line (M8): basename(cwd), added centrally in debugLog(); `format` rides
+// through from the caller's record and lands verbatim in the JSONL line.
+{
+  const dir = mkdtempSync(path.join(tmpdir(), 'jslim-m8proj-'));
+  const prev = process.env.FND_MCP_SLIM_DEBUG;
+  process.env.FND_MCP_SLIM_DEBUG = '1';
+  J.debugLog({ entry: 'cli', decision: 'compressed' }, dir);
+  J.debugLog({ entry: 'cli', decision: 'passthrough', reason: 'non-json', format: 'xml' }, dir);
+  if (prev === undefined) delete process.env.FND_MCP_SLIM_DEBUG; else process.env.FND_MCP_SLIM_DEBUG = prev;
+  const lines = readFileSync(path.join(dir, 'fnd-mcp-slim-debug.log'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  const proj = path.basename(process.cwd());
+  check('m8-project-every-line', lines.length === 2 && lines.every((l) => l.project === proj), `project missing/wrong: ${JSON.stringify(lines.map((l) => l.project))}`);
+  check('m8-format-in-line', lines[1].format === 'xml', `format not carried into the JSONL line: ${JSON.stringify(lines[1])}`);
+  check('m8-format-absent-when-omitted', lines[0].format === undefined, `compressed line must carry no format: ${JSON.stringify(lines[0])}`);
+  rmSync(dir, { recursive: true, force: true });
+}
+
 console.log(`json-slim fixtures: ${pass} passed, ${fail} failed  (parity ${byteExact} byte-exact + ${valueOnly} value-parity of 17)`);
 if (fail) { console.log(failures.join('\n')); process.exit(1); }

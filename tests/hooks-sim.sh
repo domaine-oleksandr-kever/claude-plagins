@@ -12,9 +12,10 @@
 #             big result compressed with a real full= spill, error/small results
 #             and unrecognized shapes pass through, node never spawns when disabled;
 #             M12–M16 the TTL sweep (stale pruned, fresh/foreign/debug-log kept,
-#             FND_MCP_SLIM_TTL=0 + throttle-marker skip); M17–M23 the FND_MCP_SLIM_DEBUG
+#             FND_MCP_SLIM_TTL=0 + throttle-marker skip); M17–M24 the FND_MCP_SLIM_DEBUG
 #             log (one JSONL line per invocation: compressed / size-gate / error-shape /
-#             non-json / unrecognized reasons, no file when off, rotation at ~5 MB)
+#             non-json / unrecognized reasons, no file when off, rotation at ~5 MB, plus
+#             the M8 non-json format tag + per-project project field)
 #   P cases — plugin.json UserPromptSubmit gate (FND_PROMPT_JSON) + hooks/
 #             prompt-json-guard.cjs: a big prompt carrying a big JSON blob is blocked
 #             with the blob spilled byte-exact, below-gate / no-json / small prompts
@@ -354,7 +355,7 @@ printf '%s' "$msin" | env FND_MCP_SLIM_DIR="$SWD" node "$SLIM" >/dev/null 2>&1
 if [ -f "$dbg" ] && [ -f "$dbg1" ]; then ok; else bad M16-debug-kept "sweep deleted the debug log"; fi
 if [ ! -f "$stale" ]; then ok; else bad M16-stale-swept "sweep missed a stale spill next to the debug log"; fi
 
-# ── M17–M23: FND_MCP_SLIM_DEBUG log (M6) ─────────────────────────────────────
+# ── M17–M24: FND_MCP_SLIM_DEBUG log (M6, + M8 format/project) ─────────────────
 # One JSONL metadata line per invocation → <FND_MCP_SLIM_DIR>/fnd-mcp-slim-debug.log; opt-in, never
 # any payload content. Each case uses a dedicated dir so the single line is unambiguous.
 DBGLOG="fnd-mcp-slim-debug.log"
@@ -401,18 +402,33 @@ run_dbg "$DBG" "$msin" >/dev/null
 if [ -f "$DBG/$DBGLOG.1" ]; then ok; else bad M21-rotated "log > 5 MB not rotated to .log.1"; fi
 assert_eq M21-fresh-line "$(wc -l < "$DBG/$DBGLOG" 2>/dev/null | tr -d ' ')" 1
 
-# M22: big non-JSON text → passthrough logged as non-json
+# M22: big non-JSON text → passthrough logged as non-json, format:"text" (M8) + a project tag
 DBG="$TMP/dbg-m22"; mkdir -p "$DBG"
 bignon="$(printf 'x%.0s' $(seq 1 5000))"
 in="$(jq -n --arg t "$bignon" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t}]}}')"
 run_dbg "$DBG" "$in" >/dev/null
 assert_eq M22-reason "$(jq -r '.reason' "$DBG/$DBGLOG" 2>/dev/null)" "non-json"
+assert_eq M22-format "$(jq -r '.format' "$DBG/$DBGLOG" 2>/dev/null)" "text"
+m22proj="$(jq -r '.project' "$DBG/$DBGLOG" 2>/dev/null)"
+if [ -n "$m22proj" ] && [ "$m22proj" != "null" ]; then ok; else bad M22-project "project tag missing on debug line"; fi
 
 # M23: unrecognized object shape (no text/content) → passthrough logged as unrecognized-shape
 DBG="$TMP/dbg-m23"; mkdir -p "$DBG"
 in="$(jq -cn '{tool_name:"mcp__x__y",tool_response:{stuff:[range(0;600)|{id:.,v:"padpadpadpad"}]}}')"
 run_dbg "$DBG" "$in" >/dev/null
 assert_eq M23-reason "$(jq -r '.reason' "$DBG/$DBGLOG" 2>/dev/null)" "unrecognized-shape"
+
+# M24 (M8): big non-JSON XML body → format:"xml", and the emitted stdout stays byte-identical to a
+# DEBUG-off run (the format sniff is metadata only — it never alters the passthrough).
+DBG="$TMP/dbg-m24"; mkdir -p "$DBG"
+xmlbody="<frame id=\"1\">$(printf '<node x="1"/>%.0s' $(seq 1 400))</frame>"
+in="$(jq -n --arg t "$xmlbody" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t}]}}')"
+outD="$(run_dbg "$DBG" "$in")"
+assert_eq M24-reason "$(jq -r '.reason' "$DBG/$DBGLOG" 2>/dev/null)" "non-json"
+assert_eq M24-format "$(jq -r '.format' "$DBG/$DBGLOG" 2>/dev/null)" "xml"
+DBG0="$TMP/dbg-m24-off"; mkdir -p "$DBG0"
+outN="$(printf '%s' "$in" | env -u FND_MCP_SLIM_DEBUG FND_MCP_SLIM_DIR="$DBG0" node "$SLIM" 2>/dev/null)"
+assert_eq M24-body-identical "$outD" "$outN"
 
 # ═══ P — UserPromptSubmit prompt-json-guard ═════════════════════════════════
 # Gate (FND_PROMPT_JSON) via the extracted plugin.json command[1]; behavior by piping

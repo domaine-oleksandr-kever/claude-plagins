@@ -660,7 +660,12 @@ function debugLog(record, dir) {
     try {
       if (fs.statSync(logPath).size >= DEBUG_LOG_MAX) fs.renameSync(logPath, path.join(root, `${DEBUG_LOG}.1`));
     } catch (_) {} // no log yet, or rotate failed → just append below
-    fs.appendFileSync(logPath, `${JSON.stringify({ ts: new Date().toISOString(), ...record })}\n`);
+    // `project` on EVERY line (M8): the spill dir — and so this log — is per-USER, so sessions from
+    // different projects share one file. basename(cwd) makes it filterable per project. Metadata only
+    // (basename, never the full path); best-effort — a cwd failure just omits the field.
+    let project;
+    try { project = path.basename(process.cwd()); } catch (_) {}
+    fs.appendFileSync(logPath, `${JSON.stringify({ ts: new Date().toISOString(), ...(project ? { project } : {}), ...record })}\n`);
   } catch (_) {}
 }
 
@@ -1002,8 +1007,22 @@ function toonStage(value, depth) {
   return value;
 }
 
+// Classify a NON-JSON payload by its leading bytes — a diagnostic tag for the FND_MCP_SLIM_DEBUG
+// log (M8), attached ONLY on slim()'s `non-json` passthrough branch so it costs nothing on the
+// compress path. The head is BOM-stripped and trimmed first so a leading BOM/whitespace can't hide
+// the signature. Fixed lowercase vocabulary; `broken-json` (looks like JSON yet JSON.parse failed)
+// is the diagnostic gem — it flags an upstream-truncated/malformed payload.
+function sniffFormat(content) {
+  const head = String(content).replace(/^\uFEFF/, '').trim().slice(0, 64).toLowerCase();
+  if (/^<!doctype\s+html/.test(head) || head.startsWith('<html')) return 'html';
+  if (head.startsWith('<?xml')) return 'xml';
+  if (/^<[a-z]/.test(head)) return 'xml'; // tag-like and not html → xml
+  if (head.startsWith('{') || head.startsWith('[')) return 'broken-json';
+  return 'text';
+}
+
 // slim a JSON *string* through the full pipeline →
-//   { output, wasModified, bytesIn, bytesOut, ratio, stages, reason? }.
+//   { output, wasModified, bytesIn, bytesOut, ratio, stages, reason?, format? }.
 // `stages` names the pipeline stages that actually changed the serialized bytes (adf / noise /
 // truncate / crush / toon) — the FND_MCP_SLIM_DEBUG instrumentation; populated ONLY when
 // `cfg.trace` (off by default), so the compression hot path stays single-serialization. `reason`
@@ -1015,7 +1034,9 @@ function slim(content, config) {
   const bytesIn = Buffer.byteLength(content, 'utf8');
   let parsed;
   try { parsed = JSON.parse(content); } catch (_) {
-    return { output: content, wasModified: false, bytesIn, bytesOut: bytesIn, ratio: 0, reason: 'non-json', stages: [] };
+    // `format` sniffs the head so the debug log can tell WHAT the non-JSON payload was (M8) — a
+    // pure diagnostic tag; it never changes the passthrough. Set on this branch only.
+    return { output: content, wasModified: false, bytesIn, bytesOut: bytesIn, ratio: 0, reason: 'non-json', format: sniffFormat(content), stages: [] };
   }
   // Never touch error envelopes — write-gating elsewhere depends on seeing them verbatim.
   if (isErrorShape(parsed)) {
@@ -1123,6 +1144,7 @@ if (require.main === module) {
     tool: fileArg || null,
     decision: compressed ? 'compressed' : 'passthrough',
     reason: compressed ? null : (res.reason || 'no-gain'),
+    ...(res.format ? { format: res.format } : {}), // M8: set only on the non-json branch
     bytes_in: res.bytesIn,
     bytes_out: res.bytesOut,
     pct: Math.round((res.ratio || 0) * 1000) / 10,

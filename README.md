@@ -392,7 +392,11 @@ hook error never blocks work:
   it directly. **Why wasn't a result compressed?**
   set `FND_MCP_SLIM_DEBUG=1`, re-run, and read `<FND_MCP_SLIM_DIR>/fnd-mcp-slim-debug.log` — one
   JSONL line per call records the `decision` and, on a passthrough, the `reason` (`size-gate`,
-  `error-shape`, `non-json`, `unrecognized-shape`, `no-gain`, …). *Coexistence:* if you also run
+  `error-shape`, `non-json`, `unrecognized-shape`, `no-gain`, …). A `non-json` line also carries a
+  `format` tag (`html` / `xml` / `broken-json` / `text`) so you can see WHAT slipped past the
+  JSON-only pipeline (`grep '"format":"xml"' fnd-mcp-slim-debug.log`); every line carries a
+  `project` tag (the cwd basename) since the log is shared per-user across projects
+  (`grep '"project":"my-repo"'`). *Coexistence:* if you also run
   [`squeez`](https://github.com/claudioemmanuel/squeez), both its PostToolUse hook and `mcp-slim`
   fire on `mcp__*` results — expect them to stack.
 
@@ -413,7 +417,7 @@ added to this table.
 | `FND_MCP_SLIM` | `1` | `0` disables the MCP result compressor (PostToolUse `mcp-slim` hook) — node never spawns |
 | `FND_MCP_SLIM_DIR` | `os.tmpdir()` | directory where `json-slim` and the `mcp-slim` hook spill offloaded rows / the original result (the `full=<path>` handle) |
 | `FND_MCP_SLIM_TTL` | `24` | hours a spill file survives before the exit-time sweep prunes it (by mtime, so `full=` handles outlive same-day resume); `0` disables the sweep; any invalid value falls back to `24` |
-| `FND_MCP_SLIM_DEBUG` | off | opt-in (`1`/`true`): append one JSONL trace line per `mcp-slim` / `json-slim` invocation to `<FND_MCP_SLIM_DIR>/fnd-mcp-slim-debug.log` (decision, reason, bytes, %, stages — never any payload); rotates one generation at ~5 MB. Unset ⇒ no file written |
+| `FND_MCP_SLIM_DEBUG` | off | opt-in (`1`/`true`): append one JSONL trace line per `mcp-slim` / `json-slim` invocation to `<FND_MCP_SLIM_DIR>/fnd-mcp-slim-debug.log` (project, decision, reason, `format` on non-json, bytes, %, stages — never any payload); rotates one generation at ~5 MB. Unset ⇒ no file written |
 | `FND_PROMPT_JSON` | `1` | `0` disables the prompt-JSON guard (UserPromptSubmit `prompt-json-guard` hook) — node never spawns |
 | `SHOPIFY_ADMIN_GQL_QUIET` | off | non-`0` value shortens the gql runner's engine-fallback note to `note=engine=token` |
 
