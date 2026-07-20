@@ -26,8 +26,10 @@ tokens, over the ~25k-per-`Read` cap — so cover **all** of it without loading 
    **all** of them.
 3. **Per-element measurements — `get_design_context`, processed in FULL.** This holds the exact
    px dimensions, padding, gaps, and font assignments per element, plus the hierarchy. It spills
-   to a tool-result file. A bare `Read`/`cat` of the whole file **fails** at the ~25k cap — so
-   **page through the ENTIRE file**, never stop at the first chunk:
+   to a tool-result file (over the platform limit → the compression hook never sees it). Figma
+   dev-mode context is **XML-ish, not JSON**, so `json-slim.cjs` can't compress it — it hands the
+   path back. A bare `Read`/`cat` of the whole file **fails** at the ~25k cap — so **page through
+   the ENTIRE file**, never stop at the first chunk:
    - `wc -l <file>` to get its length, then
    - `Read` it in **sequential** chunks from `offset` 0 to EOF, each with `limit` (~400–500
      lines, under 25k tokens), extracting every element's measurements as you go — **or** walk

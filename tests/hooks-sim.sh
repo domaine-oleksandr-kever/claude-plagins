@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Simulation harness for the fnd plugin's session-level hooks:
 #   S cases — plugin.json SessionStart command: per-file tolerance (one broken
-#             md must not discard the rest), FND_LEAN gate, always exit 0
+#             md must not discard the rest), FND_LEAN gate, always exit 0, and the
+#             real plugin root emitting the json-slim whale-routing instruction
 #   G cases — plugin.json UserPromptSubmit gate: FND_CTX_MONITOR semantics
 #             (only literal "0" disables), node failure never fails the hook
 #   C cases — hooks/context-stats.cjs against transcript fixtures: synthetic
@@ -44,7 +45,7 @@ assert_eq()       { if [ "$2" = "$3" ]; then ok; else bad "$1" "got '$2', want '
 # ═══ S — SessionStart per-file tolerance + store-access gating ══════════════
 SS_CMD="$(jq -r '.hooks.SessionStart[0].hooks[0].command' "$MANIFEST")"
 fake="$TMP/plugroot"; mkdir -p "$fake/hooks"
-for f in comment-discipline plugin-feedback store-access task-workspace lean-code; do
+for f in comment-discipline plugin-feedback store-access task-workspace lean-code mcp-whale; do
   echo "MARK-$f" > "$fake/hooks/$f.md"
 done
 # store-access is gated on store files in the cwd — run each case from a controlled dir
@@ -54,14 +55,14 @@ SS_PLAIN="$TMP/ss-plain"; mkdir -p "$SS_PLAIN"
 
 out="$(cd "$SS_STORE" && CLAUDE_PLUGIN_ROOT="$fake" bash -c "$SS_CMD" 2>/dev/null)"; ec=$?
 assert_eq S1-all-present-exit "$ec" 0
-for f in comment-discipline plugin-feedback store-access task-workspace lean-code; do
+for f in comment-discipline plugin-feedback store-access task-workspace lean-code mcp-whale; do
   assert_contains "S1-$f" "$out" "MARK-$f"
 done
 
 rm "$fake/hooks/plugin-feedback.md"
 out="$(cd "$SS_STORE" && CLAUDE_PLUGIN_ROOT="$fake" bash -c "$SS_CMD" 2>/dev/null)"; ec=$?
 assert_eq S2-missing-file-exit "$ec" 0
-for f in comment-discipline store-access task-workspace lean-code; do
+for f in comment-discipline store-access task-workspace lean-code mcp-whale; do
   assert_contains "S2-$f" "$out" "MARK-$f"
 done
 
@@ -73,7 +74,7 @@ assert_absent S3-no-lean "$out" "MARK-lean-code"
 out="$(cd "$SS_PLAIN" && CLAUDE_PLUGIN_ROOT="$fake" bash -c "$SS_CMD" 2>/dev/null)"; ec=$?
 assert_eq S4-no-store-exit "$ec" 0
 assert_absent S4-no-store-access "$out" "MARK-store-access"
-for f in comment-discipline task-workspace lean-code; do
+for f in comment-discipline task-workspace lean-code mcp-whale; do
   assert_contains "S4-$f" "$out" "MARK-$f"
 done
 
@@ -81,6 +82,13 @@ done
 out="$(cd "$SS_ENV" && CLAUDE_PLUGIN_ROOT="$fake" bash -c "$SS_CMD" 2>/dev/null)"; ec=$?
 assert_eq S5-env-exit "$ec" 0
 assert_contains S5-env-store-access "$out" "MARK-store-access"
+
+# S6: the REAL plugin root emits the deterministic json-slim whale-routing instruction
+realroot="$ROOT/plugins/fnd"
+out="$(cd "$SS_PLAIN" && CLAUDE_PLUGIN_ROOT="$realroot" bash -c "$SS_CMD" 2>/dev/null)"; ec=$?
+assert_eq       S6-real-root-exit  "$ec" 0
+assert_contains S6-whale-conv      "$out" "oversized MCP results"
+assert_contains S6-whale-json-slim "$out" "json-slim.cjs"
 
 # ═══ G — UserPromptSubmit FND_CTX_MONITOR gate ══════════════════════════════
 UPS_CMD="$(jq -r '.hooks.UserPromptSubmit[0].hooks[0].command' "$MANIFEST")"
@@ -365,7 +373,7 @@ if jq -e '.pct > 0' "$LOG" >/dev/null 2>&1; then ok; else bad M17-pct "pct not >
 sp="$(jq -r '.spill' "$LOG" 2>/dev/null)"
 if [ -n "$sp" ] && [ -f "$sp" ]; then ok; else bad M17-spill "spill file missing (sp='$sp')"; fi
 DBG0="$TMP/dbg-m17-off"; mkdir -p "$DBG0"
-outN="$(printf '%s' "$msin" | env FND_MCP_SLIM_DIR="$DBG0" node "$SLIM" 2>/dev/null)"
+outN="$(printf '%s' "$msin" | env -u FND_MCP_SLIM_DEBUG FND_MCP_SLIM_DIR="$DBG0" node "$SLIM" 2>/dev/null)"
 assert_eq M17-body-identical "$(sweep_body "$outD")" "$(sweep_body "$outN")"
 
 # M18: MCP error result (isError:true) → passthrough logged as error-shape (still no stdout)
@@ -380,9 +388,10 @@ DBG="$TMP/dbg-m19"; mkdir -p "$DBG"
 run_dbg "$DBG" '{"tool_name":"mcp__x__y","tool_response":{"content":[{"type":"text","text":"{\"a\":1,\"b\":2}"}]}}' >/dev/null
 assert_eq M19-reason "$(jq -r '.reason' "$DBG/$DBGLOG" 2>/dev/null)" "size-gate"
 
-# M20: DEBUG unset → no log file created at all (zero side effects)
+# M20: DEBUG unset → no log file created at all (zero side effects).
+# env -u clears any ambient FND_MCP_SLIM_DEBUG (a developer may export it to observe the log live).
 DBG="$TMP/dbg-m20"; mkdir -p "$DBG"
-printf '%s' "$msin" | env FND_MCP_SLIM_DIR="$DBG" node "$SLIM" >/dev/null 2>&1
+printf '%s' "$msin" | env -u FND_MCP_SLIM_DEBUG FND_MCP_SLIM_DIR="$DBG" node "$SLIM" >/dev/null 2>&1
 if [ ! -f "$DBG/$DBGLOG" ]; then ok; else bad M20-no-log "debug log written with FND_MCP_SLIM_DEBUG unset"; fi
 
 # M21: rotation — a >5 MB log is renamed to .log.1 before the fresh line lands in a new .log

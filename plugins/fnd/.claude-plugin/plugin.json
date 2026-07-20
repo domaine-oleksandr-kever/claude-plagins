@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "fnd",
   "displayName": "Foundation",
-  "version": "0.34.0",
+  "version": "0.35.0",
   "description": "Domaine Foundation skills for Claude Code — Agentic Assisted Development workflow for Shopify theme work.",
   "author": {
     "name": "Oleksandr Kever",
@@ -43,7 +43,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "echo \"fnd plugin root: ${CLAUDE_PLUGIN_ROOT}\"; for f in comment-discipline plugin-feedback task-workspace; do cat \"${CLAUDE_PLUGIN_ROOT}/hooks/$f.md\" 2>/dev/null; done; if [ -f shopify.theme.toml ] || [ -f .env ]; then cat \"${CLAUDE_PLUGIN_ROOT}/hooks/store-access.md\" 2>/dev/null; fi; [ \"${FND_LEAN:-1}\" = \"0\" ] || cat \"${CLAUDE_PLUGIN_ROOT}/hooks/lean-code.md\" 2>/dev/null; true"
+            "command": "echo \"fnd plugin root: ${CLAUDE_PLUGIN_ROOT}\"; for f in comment-discipline plugin-feedback task-workspace mcp-whale; do cat \"${CLAUDE_PLUGIN_ROOT}/hooks/$f.md\" 2>/dev/null; done; if [ -f shopify.theme.toml ] || [ -f .env ]; then cat \"${CLAUDE_PLUGIN_ROOT}/hooks/store-access.md\" 2>/dev/null; fi; [ \"${FND_LEAN:-1}\" = \"0\" ] || cat \"${CLAUDE_PLUGIN_ROOT}/hooks/lean-code.md\" 2>/dev/null; true"
           }
         ]
       }

@@ -205,6 +205,17 @@ check('reduction:figma≥0.70', ratio('figma-node-rest.json') >= 0.70, `figma ra
   check('cli-jq', JSON.parse(jqOut)['3326:39542'] !== undefined, '--jq narrows to a sub-path');
   const jqMiss = execFileSync('node', [SLIM, '--jq', 'no.such.path', path.join(FIX, 'figma-node-rest.json')], { encoding: 'utf8' });
   check('cli-jq-missing', jqMiss.trim() === 'null', '--jq missing path → null, no crash');
+
+  // Non-JSON FILE → hand the path back instead of re-dumping the (whale-sized) content to stdout.
+  const xmlPath = path.join(FIX, 'figma-metadata-3326-39542.xml');
+  const xmlIn = readFileSync(xmlPath, 'utf8');
+  const xmlOut = execFileSync('node', [SLIM, xmlPath], { encoding: 'utf8' });
+  check('cli-nonjson-file-handback', xmlOut.includes(xmlPath) && !xmlOut.includes('<frame') && xmlOut.length < 200,
+    'non-JSON file → path handback, not a content dump');
+  // Non-JSON via STDIN → still passes through verbatim (there is no path to hand back).
+  const stdinEcho = execFileSync('node', [SLIM], { input: 'plain text, not json', encoding: 'utf8' });
+  check('cli-nonjson-stdin-echo', stdinEcho.trim() === 'plain text, not json',
+    'non-JSON stdin → verbatim passthrough (no file to point at)');
 }
 
 // ---------------------------------------------------------------- spill-TTL sweep (M5) --

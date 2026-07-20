@@ -35,6 +35,12 @@ resolved ID, and set `field_id_mismatch` in your output.
   response to a temp file and run
   `node ${CLAUDE_PLUGIN_ROOT}/scripts/adf-to-md.cjs <file> --field <customfield_id>` per
   field, rather than hand-walking the JSON.
+- **Overflowed read (big ticket).** If the MCP result exceeds the platform limit, Claude
+  Code hands you a **file path** instead of content (the compression hook never sees it).
+  Don't raw-`Read` that file — run `node ${CLAUDE_PLUGIN_ROOT}/scripts/json-slim.cjs <path>`
+  (Jira JSON crushes ~75%) and read its stdout; `--jq <dot.path>` narrows to a sub-tree first
+  (a wrong path yields `null`, not an error — verify before trusting an empty result),
+  `--stats` shows the reduction.
 - Extract **every external URL** found anywhere in the ticket (description, AC, TA, Documentation
   Links, comments) — the ADF decoder preserves inline-mark links **and** block-level smart links
   (`inlineCard` / `blockCard` / `embedCard`) as `<url>`, so don't lose links pasted on their own

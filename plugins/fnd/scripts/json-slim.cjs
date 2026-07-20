@@ -1104,7 +1104,15 @@ if (require.main === module) {
   }
 
   const res = slim(raw, { ...cfg, trace: debugEnabled() }); // trace only when the debug log will consume `stages`
-  process.stdout.write(res.output + '\n');
+  if (fileArg && res.reason === 'non-json') {
+    // Non-JSON input: nothing to compress, and echoing it back would just re-dump the whole
+    // (possibly whale-sized) file into the caller's context. Hand the path back instead — the
+    // caller reads it directly (windowed Read), on its own judgement. Only when we have a file
+    // to point at; a non-JSON stdin stream still passes through (there is no path to return).
+    process.stdout.write(`json-slim: not JSON — nothing to compress; read the file directly: ${fileArg}\n`);
+  } else {
+    process.stdout.write(res.output + '\n');
+  }
   if (has('--stats')) {
     process.stderr.write(`json-slim: ${res.bytesIn} → ${res.bytesOut} bytes (${(res.ratio * 100).toFixed(1)}% reduction)${res.error ? ' [error-shape passthrough]' : ''}\n`);
   }

@@ -359,7 +359,8 @@ hook error never blocks work:
 
 - **SessionStart** — injects the Foundation session conventions from `hooks/*.md`
   (comment discipline, lean code, live-store access, the task-workspace convention,
-  report-plugin-defects-upstream).
+  report-plugin-defects-upstream, and routing oversized MCP results through the
+  `json-slim` CLI).
 - **SubagentStart** — `subagent-conventions.sh` re-injects comment discipline + lean code
   into code-writing subagents; read-only readers are skipped.
 - **PreToolUse (Bash) — two deterministic git guards.** `no-verify-bypass.sh` blocks
@@ -383,7 +384,12 @@ hook error never blocks work:
   same-shape-array crush). Results ≤ 4 KB and error envelopes (`isError` / `errors[]`) pass
   through untouched; the original is spilled to a file and referenced by a `<<full=…>>` handle
   so nothing is lost. Stale spills are swept by an mtime TTL (`FND_MCP_SLIM_TTL`). `FND_MCP_SLIM=0`
-  disables it; `FND_MCP_SLIM_DIR` sets the spill directory. **Why wasn't a result compressed?**
+  disables it; `FND_MCP_SLIM_DIR` sets the spill directory. A result **over** the platform limit
+  (`MAX_MCP_OUTPUT_TOKENS`, ~25k tokens) bypasses this hook — Claude Code spills it to a file and
+  hands over the path; the session convention and the reader agents route that file through the
+  same compressor on demand (`node scripts/json-slim.cjs <path>`, `--stats` to see the cut). If
+  that file isn't JSON the CLI hands the path back instead of re-dumping it, so the caller reads
+  it directly. **Why wasn't a result compressed?**
   set `FND_MCP_SLIM_DEBUG=1`, re-run, and read `<FND_MCP_SLIM_DIR>/fnd-mcp-slim-debug.log` — one
   JSONL line per call records the `decision` and, on a passthrough, the `reason` (`size-gate`,
   `error-shape`, `non-json`, `unrecognized-shape`, `no-gain`, …). *Coexistence:* if you also run
