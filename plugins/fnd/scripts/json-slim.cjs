@@ -7,6 +7,8 @@
  *   - a standalone CLI to compress an already-saved dump on demand:
  *       node json-slim.cjs <file.json> [--jq <path>] [--toon] [--no-spill] [--stats]
  *       cat big.json | node json-slim.cjs
+ *     A JSONL file is PROFILED, never compressed (stats + sample rows + line-scripting
+ *     guidance, streamed above 8 MB); non-JSONL CLI output is capped at 48 KB (spill + handback).
  *
  * The pipeline is shape-driven (each stage independent, all generic — no per-tool registry),
  * applied by slim() in this order:
@@ -34,6 +36,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
+const readline = require('readline'); // Gate B streams a whale file line-by-line — a Node built-in
 const { adfToMarkdown } = require('./adf-to-md.cjs');
 
 // ---------------------------------------------------------------------------- config --
@@ -60,6 +63,10 @@ const DEFAULTS = {
   truncate: true, // stage 4: clip base64 / data-URI / very long strings
   stringLimit: 200, // stage 4 threshold (chars)
   toon: false, // optional lossless tabular re-serialization of uniform arrays (behind a flag)
+  jsonl: true, // detect a JSONL line stream (bulk-operation dump) → crush it as the same-shape array it is
+  // --- CLI whale gates (M9b; CLI-only — the hook never reaches these sizes, the platform truncates first) ---
+  cliOutCap: 49152, // Gate A: a slimmed body larger than 48 KB is spilled + summarized, not printed inline
+  streamGateBytes: 8 * 1024 * 1024, // Gate B: a file larger than 8 MB is stream-PROFILED, never readFileSync'd
   trace: false, // instrument `stages` (which stages changed bytes) for the FND_MCP_SLIM_DEBUG feed;
   //               off ⇒ a single final compact() (pre-M6 cost) — the hot path pays nothing when off
   // preserveFields { keyName: true } leaves the value/subtree under those keys uncrushed. Escape
@@ -566,11 +573,12 @@ function buildMarker(originalItems, droppedItems, droppedCount, cfg) {
 // ------------------------------------------------------------------------- spill hygiene --
 
 // The only file prefixes the sweep will ever delete. Keep in sync with the writers' filenames:
-// `spillPath` here (fnd-crush-), `spillOriginal` in hooks/mcp-slim.cjs (fnd-mcp-slim-), and
-// `spillBlob` in hooks/prompt-json-guard.cjs (fnd-prompt-json-, swept only when it lands in the
-// sweep dir). The literals are duplicated on purpose — importing this module into a per-prompt
-// hook just for a string would drag the whole compressor into every UserPromptSubmit.
-const SPILL_PREFIXES = ['fnd-crush-', 'fnd-mcp-slim-', 'fnd-prompt-json-'];
+// `spillPath` here (fnd-crush-), `capOutput`'s Gate-A spill here (fnd-slim-out-), `spillOriginal`
+// in hooks/mcp-slim.cjs (fnd-mcp-slim-), and `spillBlob` in hooks/prompt-json-guard.cjs
+// (fnd-prompt-json-, swept only when it lands in the sweep dir). The literals are duplicated on
+// purpose — importing this module into a per-prompt hook just for a string would drag the whole
+// compressor into every UserPromptSubmit.
+const SPILL_PREFIXES = ['fnd-crush-', 'fnd-slim-out-', 'fnd-mcp-slim-', 'fnd-prompt-json-'];
 // One directory scan per throttle window, gated by this marker's mtime — the hook's hot path
 // pays one stat, not a readdir of the whole tmpdir on every MCP call. A dotfile, so it matches
 // no SPILL_PREFIX (it is excluded for good measure anyway).
@@ -790,9 +798,13 @@ function sampleMixedNumberGroup(nums, cfg) {
 }
 
 // MixedArray: group by JSON type (first-seen order), keep-all groups < 5, sub-sample the rest,
-// reassemble in original index order. No sentinel marker on this path (parity-faithful — Headroom's
-// mixed path emits none), so rows dropped here are NOT independently spilled; recovery of a mixed
-// array's dropped rows relies on the M2 hook spilling the whole original tool result.
+// reassemble in original index order. In `spill` mode (real operation) we append ONE {_ccr_dropped:…}
+// sentinel over the whole array whenever rows are dropped, backed by a real spill file — the M9 CLI
+// never spills the whole original the way the M2 hook does, so without this a `.jsonl` mixed dump
+// would return a silently-incomplete array with no drop signal and no recovery handle. In `ccr` mode
+// (byte-parity fixtures only, no spill file exists) we stay marker-less, exactly as Headroom's mixed
+// path. The per-type sub-crushes keep enableMarker:false; this single top-level marker covers every
+// dropped row across all subgroups.
 function sampleMixedArray(arr, cfg) {
   const n = arr.length;
   if (n <= 8) return { value: arr, info: 'mixed:passthrough' };
@@ -825,7 +837,17 @@ function sampleMixedArray(arr, cfg) {
   }
   const idx = [...kept].filter((i) => i >= 0 && i < n).sort((a, b) => a - b);
   const value = idx.map((i) => arr[i]);
-  return { value, info: `mixed:adaptive(${n}->${value.length},${parts.join(',')})` };
+  const droppedCount = n - value.length;
+  const info = `mixed:adaptive(${n}->${value.length},${parts.join(',')})`;
+  if (droppedCount > 0 && cfg.enableMarker && cfg.markerMode === 'spill') {
+    const dropped = arr.filter((_, i) => !kept.has(i));
+    const marker = buildMarker(arr, dropped, droppedCount, cfg);
+    // Spill failed → the dropped rows would be unrecoverable AND unsignalled; keep the array
+    // uncrushed rather than hand back an incomplete result (mirrors crushDictArray).
+    if (marker === null) return { value: arr, info: 'mixed:spill_failed' };
+    value.push({ _ccr_dropped: marker });
+  }
+  return { value, info };
 }
 
 // ---------------------------------------------------------------- recursive crush walk --
@@ -1021,6 +1043,27 @@ function sniffFormat(content) {
   return 'text';
 }
 
+// Parse a JSONL line stream (one JSON value per line — a Shopify bulk-operation dump, a saved
+// log-of-objects) into an array of rows, so `slim()` can crush it as the same-shape array it is.
+// Strict gate, because a whole-payload JSON.parse has ALREADY failed by the time we get here:
+// BOM-stripped, split on \n, blank/whitespace-only lines skipped; EVERY remaining line must parse
+// to an object or array (a bare scalar — a prose file of `42`/`true`/`null` lines — rejects the
+// whole payload, never swallowed as data), and ≥2 rows are required (a lone line that failed the
+// whole-payload parse is just broken JSON). Any failing line → null: the caller falls back to
+// today's non-json handback, so a curl-truncated bulk file (last line cut mid-object) is NOT
+// partially salvaged — the recorded M9 ceiling.
+function parseJsonl(content) {
+  const rows = [];
+  for (const line of String(content).replace(/^\uFEFF/, '').split('\n')) {
+    if (!line.trim()) continue; // structural blank line
+    let v;
+    try { v = JSON.parse(line); } catch (_) { return null; }
+    if (v === null || typeof v !== 'object') return null; // bare scalar (typeof array/object is 'object')
+    rows.push(v);
+  }
+  return rows.length >= 2 ? rows : null;
+}
+
 // slim a JSON *string* through the full pipeline →
 //   { output, wasModified, bytesIn, bytesOut, ratio, stages, reason?, format? }.
 // `stages` names the pipeline stages that actually changed the serialized bytes (adf / noise /
@@ -1033,17 +1076,28 @@ function slim(content, config) {
   if (typeof content !== 'string') return { output: content, wasModified: false, bytesIn: 0, bytesOut: 0, ratio: 0, stages: [] };
   const bytesIn = Buffer.byteLength(content, 'utf8');
   let parsed;
+  let fromJsonl = false;
   try { parsed = JSON.parse(content); } catch (_) {
-    // `format` sniffs the head so the debug log can tell WHAT the non-JSON payload was (M8) — a
-    // pure diagnostic tag; it never changes the passthrough. Set on this branch only.
-    return { output: content, wasModified: false, bytesIn, bytesOut: bytesIn, ratio: 0, reason: 'non-json', format: sniffFormat(content), stages: [] };
+    // A JSONL line stream (bulk-operation dump) is a same-shape array — route it through the
+    // normal pipeline instead of the non-json handback (M9). parseJsonl returns null unless every
+    // non-blank line is an object/array with ≥2 rows, so a truncated/prose file still falls to the
+    // `non-json` branch below, byte-identical — `broken-json` then means truly malformed.
+    const rows = cfg.jsonl ? parseJsonl(content) : null;
+    if (rows) { parsed = rows; fromJsonl = true; }
+    else {
+      // `format` sniffs the head so the debug log can tell WHAT the non-JSON payload was (M8) — a
+      // pure diagnostic tag; it never changes the passthrough. Set on this branch only.
+      return { output: content, wasModified: false, bytesIn, bytesOut: bytesIn, ratio: 0, reason: 'non-json', format: sniffFormat(content), stages: [] };
+    }
   }
-  // Never touch error envelopes — write-gating elsewhere depends on seeing them verbatim.
+  // Never touch error envelopes — write-gating elsewhere depends on seeing them verbatim. (An
+  // array — including a JSONL row stream — is object-only-false here, so bulk data flows through.)
   if (isErrorShape(parsed)) {
     return { output: content, wasModified: false, bytesIn, bytesOut: bytesIn, ratio: 0, error: true, reason: 'error-shape', stages: [] };
   }
   let value = parsed;
   const stages = [];
+  if (fromJsonl && cfg.trace) stages.push('jsonl'); // trace-only bookkeeping, like the other stages
   try {
     // The pipeline always runs; the compact()-per-stage byte-delta bookkeeping is opt-in (cfg.trace,
     // set by the FND_MCP_SLIM_DEBUG feed). Off ⇒ the hot path serializes exactly ONCE (the final
@@ -1084,12 +1138,248 @@ function isErrorShape(v) {
   return false;
 }
 
+// ================================================================ CLI whale gates (M9b) ==
+
+// Gate A — a slimmed body over the inline cap is bounded before it reaches context. A crush that keeps
+// a wide signal set, or a null-heavy dump that noise-drops without sampling, can leave an output far
+// past what belongs inline. This is the one-huge-JSON-document case (a giant saved API read); a JSONL
+// file never reaches here — it always profiles upstream and is never slimmed. Spill the slimmed output
+// and hand back a compact summary + recovery paths. STDIN has no path to point at → the caller keeps
+// the body (fileArg gate). A spill-write failure returns null → the caller prints the body (never lose
+// the result).
+function capOutput(res, fileArg, config) {
+  const cfg = { ...DEFAULTS, ...(config || {}) };
+  if (!fileArg || typeof res.output !== 'string' || res.bytesOut <= cfg.cliOutCap) return null;
+  const dir = spillRoot(cfg.spillDir);
+  try { fs.mkdirSync(dir, { recursive: true }); } catch (_) {}
+  const outPath = path.join(dir, `fnd-slim-out-${crypto.randomUUID()}.json`);
+  try { fs.writeFileSync(outPath, res.output); } catch (_) { return null; }
+  // Shape sample: the first REAL row (skipping the crush sentinel) if the body is an array, else the
+  // object itself. Truncated so one fat row can't blow the handback back past the very cap we enforce.
+  let rowsKept = null, sample = null, isArr = false;
+  try {
+    const parsed = JSON.parse(res.output);
+    if (Array.isArray(parsed)) {
+      isArr = true;
+      const real = parsed.filter((r) => !(r && typeof r === 'object' && !Array.isArray(r) && r._ccr_dropped));
+      rowsKept = real.length;
+      sample = real.length ? real[0] : null;
+    } else { sample = parsed; }
+  } catch (_) {}
+  let sampleStr = sample === null ? '(none)' : compact(sample);
+  if (sampleStr.length > 200) sampleStr = `${sampleStr.slice(0, 200)}…`;
+  const pct = ((res.ratio || 0) * 100).toFixed(1);
+  const handback =
+    `json-slim: slimmed output ${res.bytesOut} B exceeds the ${cfg.cliOutCap} B inline cap — spilled, not printed.\n` +
+    `  ${res.bytesIn} → ${res.bytesOut} bytes (${pct}% reduction)${rowsKept != null ? `, ${rowsKept} rows kept` : ''}\n` +
+    `  ${isArr ? 'first row' : 'shape'}: ${sampleStr}\n` +
+    `  slimmed output: ${outPath}\n` +
+    `  original file:  ${fileArg}\n` +
+    `  narrow with: node json-slim.cjs --jq <path> ${outPath}`;
+  return { handback, spillOut: outPath };
+}
+
+// Gate B — a file past the stream gate is PROFILED line-by-line, never loaded whole. readFileSync +
+// per-row JSON.parse of a multi-GB JSONL would OOM (a 30 MB / 200k-row file peaked ~509 MB RSS, ~17×);
+// JSONL is a line stream by design. The accumulator is O(samples): running counts + per-key stats +
+// bounded head/tail/reservoir samples. Parse failures are TOLERATED here (a whale is worth profiling
+// even with a few bad lines) — counted, not rejecting. Split from the stream so tests feed line
+// strings directly (profileLines) without a real whale.
+const PROFILE_HEAD = 5;
+const PROFILE_TAIL = 5;
+const PROFILE_RESERVOIR = 10;
+const PROFILE_DISTINCT_CAP = 1000;
+const PROFILE_BYTE_CAP = 8000; // the emitted profile stays ≤ ~8 KB (exit target: stdout ≤ 10 KB)
+
+function makeProfileAccumulator(config) {
+  return {
+    cfg: { ...DEFAULTS, ...(config || {}) },
+    lines: 0, parsed: 0, parseFailures: 0,
+    keys: new Map(), // key → { present, null, type, distinct:Set, capped }
+    head: [], tail: [], reservoir: [], seen: 0,
+  };
+}
+
+// Feed one raw line into the accumulator. Blank lines are structural; a parse failure or a non-object
+// row is tolerated (parseFailures++), object rows drive the per-key stats and the samples.
+function profileFeed(st, rawLine) {
+  const line = String(rawLine).replace(/^\uFEFF/, ''); // strip a leading BOM on the first line
+  if (!line.trim()) return;
+  st.lines++;
+  let v;
+  try { v = JSON.parse(line); } catch (_) { st.parseFailures++; return; }
+  // Accept object AND array rows — the SAME acceptance parseJsonl uses (a bare scalar is the only
+  // reject). A JSONL file of tuple rows (`[1,2,3]` per line) is legitimate bulk data; profiling it
+  // by index-key mirrors the object case (Object.keys of an array yields "0","1",… → per-position
+  // stats). Rejecting arrays here made a valid array-row JSONL profile as rows:0/all-parseFailures.
+  if (!v || typeof v !== 'object') { st.parseFailures++; return; }
+  st.parsed++;
+  for (const k of Object.keys(v)) {
+    let s = st.keys.get(k);
+    if (!s) { s = { present: 0, null: 0, type: null, distinct: new Set(), capped: false }; st.keys.set(k, s); }
+    s.present++;
+    const val = v[k];
+    if (val === null) s.null++;
+    else if (s.type === null) s.type = jsonType(val);
+    if (!s.capped) { s.distinct.add(compact(val)); if (s.distinct.size >= PROFILE_DISTINCT_CAP) s.capped = true; }
+  }
+  if (st.head.length < PROFILE_HEAD) st.head.push(v);
+  st.tail.push(v); if (st.tail.length > PROFILE_TAIL) st.tail.shift();
+  st.seen++;
+  if (st.reservoir.length < PROFILE_RESERVOIR) st.reservoir.push(v);
+  else { const j = Math.floor(Math.random() * st.seen); if (j < PROFILE_RESERVOIR) st.reservoir[j] = v; } // Algorithm R
+}
+
+// Truncate one sample row whose serialization would eat the byte budget — keep a shape hint, not bytes.
+function capSampleRow(v) {
+  const s = compact(v);
+  return s.length > 600 ? { _sample_truncated: s.length, _head: s.slice(0, 200) } : v;
+}
+
+// Collapse the accumulator into ONE compact profile object, then trim samples AND keys until it fits
+// the cap. A count cap alone does NOT bound bytes — 200 keys with long names (a wide row) serialize
+// far past PROFILE_BYTE_CAP — so after the samples ladder we shrink the emitted key set by bytes too.
+const PROFILE_KEY_CAP = 200; // cheap pre-limit before the byte ladder (a 300k-key doc never builds them all)
+function profileFinalize(st, meta) {
+  const keyEntries = [];
+  for (const [k, s] of st.keys) {
+    if (keyEntries.length >= PROFILE_KEY_CAP) break;
+    keyEntries.push([k, { present: s.present, null: s.null, type: s.type || 'null', distinct: s.capped ? PROFILE_DISTINCT_CAP : s.distinct.size, ...(s.capped ? { distinctCapped: true } : {}) }]);
+  }
+  const totalKeys = st.keys.size;
+  const profile = {
+    profile: true,
+    file: (meta && meta.file) || null,
+    bytes: meta && meta.bytes != null ? meta.bytes : null,
+    lines: st.lines,
+    rows: st.parsed,
+    parseFailures: st.parseFailures,
+    keys: {},
+    samples: {
+      head: st.head.map(capSampleRow),
+      tail: st.tail.map(capSampleRow),
+      reservoir: st.reservoir.map(capSampleRow),
+    },
+  };
+  // Emit `limit` keys and record how many were dropped (from either the pre-limit or the byte ladder).
+  const setKeys = (limit) => {
+    profile.keys = {};
+    const shown = Math.min(limit, keyEntries.length);
+    for (let i = 0; i < shown; i++) profile.keys[keyEntries[i][0]] = keyEntries[i][1];
+    const dropped = totalKeys - shown;
+    if (dropped > 0) profile.keysTruncated = dropped; else delete profile.keysTruncated;
+  };
+  setKeys(keyEntries.length);
+  const size = () => Buffer.byteLength(compact(profile), 'utf8');
+  if (size() > PROFILE_BYTE_CAP) { profile.samples.reservoir = []; }
+  if (size() > PROFILE_BYTE_CAP) { profile.samples.tail = []; }
+  if (size() > PROFILE_BYTE_CAP) { profile.samples.head = profile.samples.head.slice(0, 2); }
+  if (size() > PROFILE_BYTE_CAP) { profile.samples = { note: 'omitted (over size budget)' }; }
+  // Keys can still dominate (wide rows / a misidentified minified single object) — binary-search the
+  // largest key count that fits. setKeys(0) empties keys and the base profile is tiny, so this always
+  // converges (a single key name > the cap collapses to keys:{}, keysTruncated:<total>).
+  if (size() > PROFILE_BYTE_CAP) {
+    let lo = 0, hi = Object.keys(profile.keys).length, best = 0;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      setKeys(mid);
+      if (size() <= PROFILE_BYTE_CAP) { best = mid; lo = mid + 1; } else { hi = mid - 1; }
+    }
+    setKeys(best);
+  }
+  return profile;
+}
+
+// Synchronous profile over an iterable of raw line strings — the test seam; streamProfile shares the
+// same accumulator over a file stream.
+function profileLines(lines, meta, cfg) {
+  const st = makeProfileAccumulator(cfg);
+  for (const line of lines) profileFeed(st, line);
+  return profileFinalize(st, meta || {});
+}
+
+// Single-pass readline over a read stream — O(samples) memory, so it works at GB scale.
+function streamProfile(file, cfg) {
+  return new Promise((resolve, reject) => {
+    let bytes = 0;
+    try { bytes = fs.statSync(file).size; } catch (_) {}
+    const st = makeProfileAccumulator(cfg);
+    const rl = readline.createInterface({ input: fs.createReadStream(file, { encoding: 'utf8' }), crlfDelay: Infinity });
+    rl.on('line', (line) => profileFeed(st, line));
+    rl.on('close', () => resolve(profileFinalize(st, { file, bytes })));
+    rl.on('error', reject);
+  });
+}
+
+// The shared "what to do with this whale" block — printed after a PROFILE by BOTH the streaming Gate B
+// and the JSONL Gate A case, so both paths speak identically (one home for the guidance text). Points
+// at the ORIGINAL file: its path, the row count, a ready-to-adapt readline template the model fills
+// from the profile's sample rows, and sed/grep for single-row extraction. --jq is deliberately NOT
+// offered — it re-reads the whole file and defeats the streaming/profiling that made the whale
+// tractable. The samples in the profile exist precisely so the model can write the filter correctly
+// (they reveal gotchas like a `children.value` sub-field being a JSON-encoded STRING, not an array).
+// This is the intended interface for analytical questions over data files: query the original by line,
+// don't pull the data into context.
+// Wrap a path as a single POSIX shell token (single-quoted, embedded ' → '\'') so the copy-paste
+// recovery commands survive spaces, quotes, `$`, etc. in the path.
+function shq(s) { return `'${String(s).replace(/'/g, `'\\''`)}'`; }
+function whaleGuidance(file, rows) {
+  const qf = shq(file);
+  // The node -e script: JSON.stringify escapes the path for the inner JS string literal (handles " and
+  // \); shq then single-quotes the WHOLE script for the shell (handles ' in the path). Both layers
+  // needed — a bare "${file}" broke on a " in the path AND on a space splitting the shell token.
+  const script = `const rl=require("readline").createInterface({input:require("fs").createReadStream(${JSON.stringify(file)})});rl.on("line",l=>{const o=JSON.parse(l);/* filter, e.g. JSON.parse(o.children?.value||"[]").length>50 */&&console.log(o.handle)})`;
+  return `json-slim: query the ORIGINAL by line, don't pull it into context — ${file}${rows != null ? ` (${rows} rows)` : ''}.\n` +
+    `  filter rows (adapt the /* … */ predicate from the sample rows above):\n` +
+    `    node -e ${shq(script)}\n` +
+    `  single rows: sed -n '<N>p' ${qf}  ·  grep <pattern> ${qf}  (--jq would re-read the whole file)`;
+}
+function streamJqRefusal(file, bytes) {
+  const qf = shq(file);
+  return `json-slim: --jq re-reads the whole file, but ${file} is ${bytes} B (> ${DEFAULTS.streamGateBytes} B) — refusing to load it. ` +
+    `Extract rows with \`sed -n '<N>p' ${qf}\` or \`grep <pat> ${qf}\`.`;
+}
+// A file over the stream gate that is NOT a JSONL row stream (a single large JSON document, or an
+// unparseable file) — profiling it as rows is misleading. Hand the path back with honest guidance:
+// json-slim won't load a file this size whole, so inspect it with external tools.
+function bigDocNotice(file, bytes) {
+  const qf = shq(file);
+  return `json-slim: ${file} is ${bytes} B (> ${DEFAULTS.streamGateBytes} B) and is NOT a JSONL row stream — a single large JSON document. ` +
+    `json-slim won't load a file this size whole; inspect it with \`head -c <N> ${qf}\`, \`jq\`, or \`grep\`, or split it into JSONL rows first.`;
+}
+
+// The ONE profile emitter, shared by BOTH profile feeds — Gate B's readline stream (>8 MB) and the
+// ≤8 MB JSONL file case: the compact profile JSON, the guidance block over the original, one debug line
+// (passthrough-family + `profile:true`, reusing the existing `stream-profile` reason — no new value),
+// then the exit sweep. `bytes` is the original file size so the debug line's bytes_in matches the file
+// regardless of how the profile was fed.
+function emitProfile(profile, file, bytes, t0, cfg) {
+  // Gate B fires on SIZE alone, before any JSONL detection, so a >8 MB NON-JSONL document (a single
+  // minified JSON array/object, a pretty-printed doc whose lines are fragments) reaches here too and
+  // profiles as rows:0/1 with all-parseFailures — a row profile + row guidance is misleading for it.
+  // A genuine JSONL row stream always has ≥2 parsed rows (parseJsonl's own threshold); below that we
+  // hand the file back with non-JSONL guidance instead. (The ≤8 MB JSONL path guarantees rows≥2.)
+  if (profile.rows < 2) {
+    const notice = bigDocNotice(file, bytes);
+    process.stdout.write(notice + '\n');
+    debugLog({ entry: 'cli', tool: file, decision: 'passthrough', reason: 'big-nonjsonl', bytes_in: bytes, bytes_out: Buffer.byteLength(notice, 'utf8'), pct: 0, stages: [], spill: null, spill_out: null, ms: Date.now() - t0 }, cfg.spillDir);
+    sweepSpills(cfg.spillDir);
+    return;
+  }
+  const body = compact(profile);
+  process.stdout.write(body + '\n');
+  process.stdout.write(whaleGuidance(file, profile.rows) + '\n');
+  debugLog({ entry: 'cli', tool: file, decision: 'passthrough', reason: 'stream-profile', bytes_in: bytes, bytes_out: Buffer.byteLength(body, 'utf8'), pct: 0, stages: [], spill: null, spill_out: null, profile: true, ms: Date.now() - t0 }, cfg.spillDir);
+  sweepSpills(cfg.spillDir);
+}
+
 module.exports = {
-  slim, crush, crushValue,
+  slim, crush, crushValue, parseJsonl,
   classifyArray, computeOptimalK, analyseDictArray, isErrorShape,
   adfStage, noiseStage, truncateStage, toonStage,
   sweepSpills, spillTtlHours, spillRoot,
   debugLog, debugEnabled,
+  capOutput, streamProfile, profileLines,
   DEFAULTS,
 };
 
@@ -1101,6 +1391,37 @@ if (require.main === module) {
   const has = (f) => args.includes(f);
   const opt = (f) => { const i = args.indexOf(f); return i !== -1 && args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : null; };
   const fileArg = args.find((a, i) => !a.startsWith('--') && args[i - 1] !== '--jq');
+  const jq = opt('--jq');
+  // Segments of the --jq path (simple dot-walk). An empty result — `.` / `..` / leading/trailing dots —
+  // is the IDENTITY selector: it addresses the WHOLE value, not a single row/field. On a JSONL file
+  // that means "the whole file", which must PROFILE like a no-jq run, never crush the reshaped array.
+  const jqSegs = jq != null ? jq.split('.').filter(Boolean) : null;
+  const jqIdentity = jq != null && jqSegs.length === 0;
+
+  const cfg = {};
+  if (has('--toon')) cfg.toon = true;
+  if (has('--no-spill')) cfg.enableMarker = false;
+
+  // Gate B (M9b) — a file past the stream gate is PROFILED line-by-line, never loaded whole; a
+  // readFileSync + per-row JSON.parse of a multi-GB JSONL would OOM. CLI-only: MCP results never
+  // reach this size (the platform truncates far earlier), so the mcp-slim hook is untouched.
+  if (fileArg) {
+    let sz = -1;
+    try { sz = fs.statSync(fileArg).size; } catch (_) {}
+    if (sz > DEFAULTS.streamGateBytes) {
+      if (jq) {
+        // --jq would re-read the whole gigabyte to walk one path — refuse and point at line tools.
+        process.stdout.write(streamJqRefusal(fileArg, sz) + '\n');
+        debugLog({ entry: 'cli', tool: fileArg, decision: 'passthrough', reason: 'stream-jq-refused', bytes_in: sz, bytes_out: 0, pct: 0, stages: [], spill: null, spill_out: null, ms: Date.now() - t0 }, cfg.spillDir);
+        sweepSpills(cfg.spillDir);
+      } else {
+        streamProfile(fileArg, cfg)
+          .then((profile) => emitProfile(profile, fileArg, sz, t0, cfg))
+          .catch((e) => { process.stderr.write('json-slim: profile failed: ' + e.message + '\n'); process.exit(1); });
+      }
+      return; // scheduled (async) or done (sync) — never fall through to the load-whole-file path
+    }
+  }
 
   let raw;
   try { raw = fileArg ? fs.readFileSync(fileArg, 'utf8') : fs.readFileSync(0, 'utf8'); } catch (e) {
@@ -1108,16 +1429,33 @@ if (require.main === module) {
     process.exit(1);
   }
 
-  const cfg = {};
-  if (has('--toon')) cfg.toon = true;
-  if (has('--no-spill')) cfg.enableMarker = false;
+  // A JSONL FILE (≤ the stream gate, no --jq) is NEVER compressed — it PROFILES, exactly like Gate B.
+  // parseJsonl is the strict detector (≥2 lines, each a JSON object/array): a regular JSON document
+  // fails it on line 1 and slims below; a truncated/prose file also declines and falls to the non-json
+  // handback. Detecting BEFORE slim keeps crush from ever running on a JSONL file — so no fnd-crush-*
+  // and no fnd-slim-out spill is ever written for it. STDIN never profiles (no on-disk original to
+  // point the guidance at) — it keeps flowing through the pipeline below. `--jq .` (identity) selects
+  // the WHOLE file, so it counts as "no narrowing" here and profiles too — otherwise the identity walk
+  // leaves the whole reshaped array and slim() would crush + spill it (a JSONL body, contract-forbidden).
+  if (fileArg && (!jq || jqIdentity)) {
+    const rows = parseJsonl(raw);
+    if (rows) {
+      const bytes = Buffer.byteLength(raw, 'utf8');
+      emitProfile(profileLines(raw.split('\n'), { file: fileArg, bytes }, cfg), fileArg, bytes, t0, cfg);
+      return;
+    }
+  }
 
   // --jq <dot.path>: narrow to a sub-path before slimming (simple key/index walk, no jq dependency).
-  const jq = opt('--jq');
   if (jq) {
     let v;
-    try { v = JSON.parse(raw); } catch (e) { process.stderr.write('json-slim: input is not valid JSON: ' + e.message + '\n'); process.exit(1); }
-    for (const seg of jq.split('.').filter(Boolean)) {
+    try { v = JSON.parse(raw); } catch (e) {
+      // A JSONL file is a same-shape array — let `--jq 0.handle` address a row directly (M9).
+      const rows = parseJsonl(raw);
+      if (rows) v = rows;
+      else { process.stderr.write('json-slim: input is not valid JSON: ' + e.message + '\n'); process.exit(1); }
+    }
+    for (const seg of jqSegs) {
       if (v == null) break;
       v = Array.isArray(v) && /^\d+$/.test(seg) ? v[Number(seg)] : v[seg];
     }
@@ -1125,12 +1463,19 @@ if (require.main === module) {
   }
 
   const res = slim(raw, { ...cfg, trace: debugEnabled() }); // trace only when the debug log will consume `stages`
-  if (fileArg && res.reason === 'non-json') {
-    // Non-JSON input: nothing to compress, and echoing it back would just re-dump the whole
-    // (possibly whale-sized) file into the caller's context. Hand the path back instead — the
-    // caller reads it directly (windowed Read), on its own judgement. Only when we have a file
-    // to point at; a non-JSON stdin stream still passes through (there is no path to return).
-    process.stdout.write(`json-slim: not JSON — nothing to compress; read the file directly: ${fileArg}\n`);
+  const compressed = res.wasModified && res.bytesOut < res.bytesIn;
+  // Hand the file path back — instead of re-dumping the whole (possibly whale-sized) file — for a
+  // non-JSON file: never compressible, and a truncated/broken JSONL lands here too (parseJsonl already
+  // declined it above, so it was not profiled). A non-JSON STDIN stream has no path to return, so it
+  // still passes through below.
+  const handback = fileArg && res.reason === 'non-json';
+  // Gate A (M9b) — a slimmed body over the inline cap is spilled + summarized, not dumped: one huge JSON
+  // document (JSONL files never reach here — they profiled upstream).
+  const capped = handback ? null : capOutput(res, fileArg, cfg);
+  if (handback) {
+    process.stdout.write(`json-slim: nothing to compress; read the file directly: ${fileArg}\n`);
+  } else if (capped) {
+    process.stdout.write(capped.handback + '\n');
   } else {
     process.stdout.write(res.output + '\n');
   }
@@ -1138,7 +1483,6 @@ if (require.main === module) {
     process.stderr.write(`json-slim: ${res.bytesIn} → ${res.bytesOut} bytes (${(res.ratio * 100).toFixed(1)}% reduction)${res.error ? ' [error-shape passthrough]' : ''}\n`);
   }
   // Debug trace (opt-in FND_MCP_SLIM_DEBUG) — one JSONL line for this run; never touches stdout.
-  const compressed = res.wasModified && res.bytesOut < res.bytesIn;
   debugLog({
     entry: 'cli',
     tool: fileArg || null,
@@ -1150,6 +1494,7 @@ if (require.main === module) {
     pct: Math.round((res.ratio || 0) * 1000) / 10,
     stages: res.stages || [],
     spill: null,
+    spill_out: capped ? capped.spillOut : null, // M9b Gate A: the fnd-slim-out-* spill (non-JSONL huge doc)
     ms: Date.now() - t0,
   }, cfg.spillDir);
   // Spill hygiene at exit — prune stale spills (best-effort; never affects output or exit code).

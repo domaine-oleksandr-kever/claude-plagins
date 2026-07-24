@@ -318,5 +318,176 @@ rc=0; (cd "$FB" && node scripts/fix-breaking-changes.js) >"$O" 2>"$E" || rc=$?
 if [ "$rc" -eq 0 ] && ! grep -q 'Error processing' "$O" "$E"; then ok; else bad F1-banner-config "rc=$rc :: $(grep 'Error processing' "$O" "$E" | head -2)"; fi
 if head -1 "$FB/config/settings_data.json" | grep -q '/\* banner'; then ok; else bad F2-banner-preserved "banner lost: $(head -1 "$FB/config/settings_data.json")"; fi
 
+# ---------------------------------------- json-slim.cjs CLI on a JSONL file (M9b final contract) --
+# A JSONL FILE via the CLI is NEVER compressed and its body is NEVER printed, at ANY size. The CLI
+# always emits a PROFILE (row/parse-fail counts, per-key stats, head/tail/reservoir samples) + a
+# guidance block over the ORIGINAL (readline filter template + sed/grep). ≤8 MB profiles the in-memory
+# rows; >8 MB streams via readline — SAME output shape. No fnd-crush-* / fnd-slim-out spill for a JSONL
+# run. A NON-JSONL JSON document keeps the old slim behavior (+ the 48 KB output cap). All in-tmp.
+SLIM="$ROOT/plugins/fnd/scripts/json-slim.cjs"
+JLD="$TMP/jsonl"; mkdir -p "$JLD"
+
+# J1: a SMALL (60-row) unique-entity JSONL → PROFILE + guidance, NEVER the crushed array body (no
+# _ccr_dropped / <<full= sentinel — crush never ran) and no handback line; a dir diff before/after
+# proves NO fnd-crush-*/fnd-slim-out-* spill is written for a JSONL run.
+JLSMALL="$JLD/small.jsonl"
+node -e '
+  const fs=require("fs");
+  const rows=Array.from({length:60},(_,i)=>JSON.stringify({id:i,tok:`unique-${i}-${(i*2654435761>>>0).toString(36)}`,n:i*7+1,ok:true}));
+  fs.writeFileSync(process.argv[1], rows.join("\n")+"\n");
+' "$JLSMALL"
+SMD="$JLD/smallout"; mkdir -p "$SMD"
+before="$(ls "$SMD")"
+rc=0; FND_MCP_SLIM_DIR="$SMD" node "$SLIM" "$JLSMALL" >"$O" 2>"$E" || rc=$?
+after="$(ls "$SMD")"
+spills=$(ls "$SMD" 2>/dev/null | grep -cE '^fnd-(crush|slim-out)-' || true)
+if [ "$rc" -eq 0 ] && grep -q '"profile":true' "$O" && grep -q 'readline' "$O" && grep -q 'sed -n' "$O" \
+   && grep -q "$JLSMALL" "$O" && ! grep -q 'nothing to compress' "$O" \
+   && ! grep -q '_ccr_dropped' "$O" && ! grep -q '<<full=' "$O" \
+   && [ "$spills" -eq 0 ] && [ "$before" = "$after" ]; then ok
+else bad J1-jsonl-small-profile "rc=$rc spills=$spills head=$(head -c 160 "$O")"; fi
+
+# J2: a real-file-shaped bulk JSONL (id/handle/children, like the ELC store dump) → PROFILE with per-key
+# stats for those keys + a first-rows sample, stdout ≤ 10 KB, never the crushed array body.
+JLREAL="$JLD/real.jsonl"
+node -e '
+  const fs=require("fs");
+  const rows=Array.from({length:500},(_,i)=>JSON.stringify({id:`gid://shopify/Product/${1000+i}`,handle:`product-${i}`,children:i%3?null:[i],ordered:null,bundleRefs:null}));
+  fs.writeFileSync(process.argv[1], rows.join("\n")+"\n");
+' "$JLREAL"
+rc=0; FND_MCP_SLIM_DIR="$JLD" node "$SLIM" "$JLREAL" >"$O" 2>"$E" || rc=$?
+outb=$(wc -c < "$O" | tr -d ' ')
+if [ "$rc" -eq 0 ] && grep -q '"profile":true' "$O" && grep -q '"handle"' "$O" && grep -q '"children"' "$O" \
+   && grep -q 'product-0' "$O" && grep -q "$JLREAL" "$O" && [ "$outb" -le 10240 ] \
+   && ! grep -q 'nothing to compress' "$O"; then ok
+else bad J2-jsonl-real-profile "rc=$rc outb=$outb head=$(head -c 160 "$O")"; fi
+
+# J3: --jq 0.<key> still addresses a single value on a ≤8 MB JSONL file (parseJsonl before the walk)
+rc=0; jqout="$(FND_MCP_SLIM_DIR="$JLD" node "$SLIM" --jq 0.handle "$JLREAL" 2>/dev/null)" || rc=$?
+if [ "$rc" -eq 0 ] && [ "$jqout" = '"product-0"' ]; then ok; else bad J3-jsonl-jq "rc=$rc out=$jqout"; fi
+
+# J4: a truncated JSONL (last line cut mid-object) is NOT a JSONL profile — parseJsonl declines it, so it
+# falls to the non-json path handback (read the file directly).
+JLBAD="$JLD/broken.jsonl"
+node -e '
+  const fs=require("fs");
+  const good=fs.readFileSync(process.argv[1],"utf8").split("\n").filter(Boolean);
+  const last=good.pop(); good.push(last.slice(0, Math.floor(last.length/2)));  // cut mid-object → invalid
+  fs.writeFileSync(process.argv[2], good.join("\n")+"\n");
+' "$JLREAL" "$JLBAD"
+rc=0; FND_MCP_SLIM_DIR="$JLD" node "$SLIM" "$JLBAD" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q 'nothing to compress' "$O" && grep -q "$JLBAD" "$O" && ! grep -q '"profile"' "$O"; then ok
+else bad J4-jsonl-truncated-handback "rc=$rc out=$(head -c 120 "$O")"; fi
+
+# J5: a NON-JSONL JSON document (one big array, not line-delimited) keeps the UNCHANGED slim behavior —
+# a compressed array on stdout, never a profile and never a handback.
+JSONARR="$JLD/array.json"
+node -e '
+  const fs=require("fs");
+  const arr=Array.from({length:500},(_,i)=>({id:i,status:"ACTIVE",vendor:"MAC",note:null}));
+  fs.writeFileSync(process.argv[1], JSON.stringify(arr));
+' "$JSONARR"
+inb=$(wc -c < "$JSONARR" | tr -d ' ')
+rc=0; FND_MCP_SLIM_DIR="$JLD" node "$SLIM" "$JSONARR" >"$O" 2>"$E" || rc=$?
+outb=$(wc -c < "$O" | tr -d ' ')
+if [ "$rc" -eq 0 ] && ! grep -q '"profile":true' "$O" && ! grep -q 'nothing to compress' "$O" \
+   && ! grep -q 'slimmed output' "$O" && [ "$outb" -lt "$inb" ] \
+   && node -e 'process.exit(Array.isArray(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")))?0:1)' "$O"; then ok
+else bad J5-nonjsonl-json-unchanged "rc=$rc in=$inb out=$outb head=$(head -c 120 "$O")"; fi
+
+# ---------------------------------------- json-slim.cjs whale gates (M9b) --
+# Gate B: a JSONL file past the 8 MB stream gate is PROFILED via readline (never readFileSync'd) — the
+# SAME profile+guidance shape the ≤8 MB path emits, bounded stdout. Gate A: a huge NON-JSONL document
+# over the 48 KB output cap is spilled + summarized. Both CLI-only; the hook never sees these sizes.
+
+# J6: a ~9 MB JSONL streams to a bounded PROFILE (not the whole array), stdout ≤ 10 KB, followed by the
+# shared guidance block (readline filter template + sed/grep single-row hint), no fnd-slim-out spill,
+# and fast (elapsed ≤ 3 s — streaming, not a full parse of every row into memory).
+JLBIG="$JLD/whale.jsonl"
+node -e '
+  const fs=require("fs"), ws=fs.createWriteStream(process.argv[1]);
+  let n=0; const T=110000;  // ~9 MB of small rows (fast to generate)
+  (function w(){ let ok=true; while(ok && n<T){ n++; ok=ws.write(JSON.stringify({id:n,handle:`product-${n}`,status:n%7?"ACTIVE":"DRAFT",vendor:"MAC",price:(n%100)+0.99})+"\n"); } n<T ? ws.once("drain",w) : ws.end(); })();
+' "$JLBIG"
+bigb=$(wc -c < "$JLBIG" | tr -d ' ')
+start=$(date +%s)
+rc=0; FND_MCP_SLIM_DIR="$JLD" node "$SLIM" "$JLBIG" >"$O" 2>"$E" || rc=$?
+elapsed=$(( $(date +%s) - start ))
+outb=$(wc -c < "$O" | tr -d ' ')
+if [ "$rc" -eq 0 ] && [ "$bigb" -gt 8388608 ] && grep -q '"profile":true' "$O" && grep -q 'sed -n' "$O" \
+   && grep -q 'readline' "$O" && grep -q "$JLBIG" "$O" \
+   && [ "$outb" -le 10240 ] && [ "$elapsed" -le 3 ] && ! grep -q 'fnd-slim-out' "$O"; then ok
+else bad J6-jsonl-whale-profile "rc=$rc bigb=$bigb outb=$outb elapsed=${elapsed}s head=$(head -c 120 "$O")"; fi
+
+# J7: --jq on the same >8 MB file REFUSES with guidance instead of loading a gigabyte (no jq walk)
+rc=0; FND_MCP_SLIM_DIR="$JLD" node "$SLIM" --jq 0.status "$JLBIG" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q 'refusing to load' "$O" && grep -q 'sed -n' "$O" && ! grep -q '"profile"' "$O"; then ok
+else bad J7-jsonl-whale-jq-refuse "rc=$rc head=$(head -c 160 "$O")"; fi
+
+# J8: a huge NON-JSONL JSON document whose slimmed body still exceeds the 48 KB inline cap is spilled to
+# an fnd-slim-out-* file + summarized, never dumped inline (Gate A, the one-huge-document case).
+BIGDOC="$JLD/bigdoc.json"
+node -e '
+  const fs=require("fs");
+  const o={}; for(let i=0;i<3000;i++) o[`field_${i}`]=`value string number ${i} kept intact`;
+  fs.writeFileSync(process.argv[1], JSON.stringify(o));
+' "$BIGDOC"
+BDD="$JLD/bigdocout"; mkdir -p "$BDD"
+rc=0; FND_MCP_SLIM_DIR="$BDD" node "$SLIM" "$BIGDOC" >"$O" 2>"$E" || rc=$?
+slimspill=$(ls "$BDD" 2>/dev/null | grep -c '^fnd-slim-out-' || true)
+if [ "$rc" -eq 0 ] && grep -q 'exceeds the' "$O" && grep -q 'spilled, not printed' "$O" \
+   && grep -q "$BIGDOC" "$O" && [ "$slimspill" -eq 1 ] && ! grep -q '"profile"' "$O"; then ok
+else bad J8-nonjsonl-gateA-spill "rc=$rc spills=$slimspill head=$(head -c 160 "$O")"; fi
+
+# J9: the CLI exit sweep prunes a stale fnd-slim-out-* while keeping a fresh one (M5 sweep extended);
+# any CLI run triggers the sweep — here a JSONL profile run (which itself writes no spill).
+SWD="$JLD/sweepout"; mkdir -p "$SWD"
+stale="$SWD/fnd-slim-out-STALE.json"; printf '[]' > "$stale"; touch -t 200001010000 "$stale"
+fresh="$SWD/fnd-slim-out-FRESH.json"; printf '[]' > "$fresh"
+FND_MCP_SLIM_DIR="$SWD" node "$SLIM" "$JLREAL" >/dev/null 2>&1
+if [ ! -f "$stale" ] && [ -f "$fresh" ]; then ok
+else bad J9-slim-out-sweep "stale-gone=$([ -f "$stale" ] && echo no || echo yes) fresh-kept=$([ -f "$fresh" ] && echo yes || echo no)"; fi
+
+# J10: `--jq .` (identity) on a ≤8 MB JSONL PROFILES like a no-jq run — identity selects the WHOLE file,
+# so it must NOT crush the reshaped array to a body + spill. Regression: a dot-path that filters to zero
+# segments (`.` / `..`) bypassed the profile guard and routed the full row array through slim().
+J10D="$JLD/jqid"; mkdir -p "$J10D"
+before="$(ls "$J10D")"
+rc=0; FND_MCP_SLIM_DIR="$J10D" node "$SLIM" --jq . "$JLREAL" >"$O" 2>"$E" || rc=$?
+after="$(ls "$J10D")"
+spills=$(ls "$J10D" 2>/dev/null | grep -cE '^fnd-(crush|slim-out)-' || true)
+if [ "$rc" -eq 0 ] && grep -q '"profile":true' "$O" && ! grep -q '_ccr_dropped' "$O" && ! grep -q '<<full=' "$O" \
+   && [ "$spills" -eq 0 ] && [ "$before" = "$after" ]; then ok
+else bad J10-jq-identity-profiles "rc=$rc spills=$spills head=$(head -c 120 "$O")"; fi
+
+# J11: the guidance commands survive a path with SPACES and a DOUBLE-QUOTE — the node -e path is
+# JSON-escaped for the JS string literal and shell single-quoted for the shell; sed/grep tokens are
+# single-quoted too. Regression: unquoted interpolation split the path on spaces / broke the JS string.
+WQD="$JLD/we ir\"d"; mkdir -p "$WQD"; WQF="$WQD/da ta.jsonl"
+printf '{"a":1,"handle":"HH1"}\n{"a":2,"handle":"HH2"}\n' > "$WQF"
+rc=0; FND_MCP_SLIM_DIR="$JLD" node "$SLIM" "$WQF" >"$O" 2>"$E" || rc=$?
+# adapt the node -e template (replace the /* filter */ placeholder with `true`) and run it verbatim
+NODELINE="$(grep 'node -e' "$O" | sed 's#/\* filter[^*]*\*/#true#')"
+nout="$(eval "$NODELINE" 2>/dev/null || true)"
+if [ "$rc" -eq 0 ] && printf '%s' "$nout" | grep -q 'HH1' && printf '%s' "$nout" | grep -q 'HH2' \
+   && grep -Fq "sed -n '<N>p' '$WQF'" "$O" && grep -Fq "grep <pattern> '$WQF'" "$O"; then ok
+else bad J11-guidance-shell-safe "rc=$rc node=[$nout]"; fi
+
+# J12: a >8 MB NON-JSONL single JSON document hits Gate B on SIZE but is not a row stream — it gets an
+# honest hand-back, NOT a misleading rows:0 profile. Regression: Gate B profiled it as JSONL → rows:0.
+BIGND="$JLD/bignonjsonl.json"
+node -e '
+  const fs=require("fs"), ws=fs.createWriteStream(process.argv[1]);
+  ws.write("{"); for(let i=0;i<300000;i++){ ws.write((i?",":"")+JSON.stringify("field_"+i)+":"+JSON.stringify("value string "+i)); } ws.write("}");
+  ws.end();
+' "$BIGND"
+bignb=$(wc -c < "$BIGND" | tr -d ' ')
+BNDD="$JLD/bigndout"; mkdir -p "$BNDD"
+rc=0; FND_MCP_SLIM_DIR="$BNDD" node "$SLIM" "$BIGND" >"$O" 2>"$E" || rc=$?
+spills=$(ls "$BNDD" 2>/dev/null | grep -cE '^fnd-' || true)
+if [ "$rc" -eq 0 ] && [ "$bignb" -gt 8388608 ] && grep -q 'NOT a JSONL row stream' "$O" && grep -q "$BIGND" "$O" \
+   && ! grep -q '"profile":true' "$O" && ! grep -q '"rows":0' "$O" && [ "$spills" -eq 0 ]; then ok
+else bad J12-big-nonjsonl-notice "rc=$rc bignb=$bignb spills=$spills head=$(head -c 160 "$O")"; fi
+
 echo "scripts-sim: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then printf '%s' "$failures"; exit 1; fi

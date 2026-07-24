@@ -15,7 +15,8 @@
 #             FND_MCP_SLIM_TTL=0 + throttle-marker skip); M17–M24 the FND_MCP_SLIM_DEBUG
 #             log (one JSONL line per invocation: compressed / size-gate / error-shape /
 #             non-json / unrecognized reasons, no file when off, rotation at ~5 MB, plus
-#             the M8 non-json format tag + per-project project field)
+#             the M8 non-json format tag + per-project project field); M25–M26 the M9
+#             JSONL path (a bulk-operation line stream compresses like an array, `jsonl` stage)
 #   P cases — plugin.json UserPromptSubmit gate (FND_PROMPT_JSON) + hooks/
 #             prompt-json-guard.cjs: a big prompt carrying a big JSON blob is blocked
 #             with the blob spilled byte-exact, below-gate / no-json / small prompts
@@ -429,6 +430,29 @@ assert_eq M24-format "$(jq -r '.format' "$DBG/$DBGLOG" 2>/dev/null)" "xml"
 DBG0="$TMP/dbg-m24-off"; mkdir -p "$DBG0"
 outN="$(printf '%s' "$in" | env -u FND_MCP_SLIM_DEBUG FND_MCP_SLIM_DIR="$DBG0" node "$SLIM" 2>/dev/null)"
 assert_eq M24-body-identical "$outD" "$outN"
+
+# ── M25–M26: JSONL detection (M9) ─────────────────────────────────────────────
+# A tool result whose text is a JSONL line stream (bulk-operation dump) is a same-shape array; the
+# hook must crush it like any other (updatedToolOutput + a full= recovery spill) and — with DEBUG
+# on — record the `jsonl` stage. The block is generated in-test (no committed 468 KB fixture).
+JLB="$(node -e '
+  const rows=Array.from({length:400},(_,i)=>JSON.stringify({id:`gid://shopify/Product/${1000+i}`,status:"ACTIVE",vendor:"MAC",productType:"Lipstick",publishedAt:"2024-01-01"}));
+  process.stdout.write(rows.join("\n"));
+')"
+in="$(jq -n --arg t "$JLB" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t}]}}')"
+
+# M25: a >4 KB JSONL text block → updatedToolOutput carrying a full= spill that exists on disk
+out="$(run_slim "$in")"
+assert_contains M25-updated "$out" "updatedToolOutput"
+text="$(printf '%s' "$out" | jq -r '.hookSpecificOutput.updatedToolOutput.content[0].text' 2>/dev/null)"
+p="$(printf '%s' "$text" | grep -o 'full=[^ >]*' | head -1 | sed 's/^full=//')"
+if [ -n "$p" ] && [ -f "$p" ]; then ok; else bad M25-fullfile "no existing full= file (p='$p')"; fi
+
+# M26: DEBUG on → the emitted line is `compressed` and its stages include `jsonl`
+DBG="$TMP/dbg-m26"; mkdir -p "$DBG"
+run_dbg "$DBG" "$in" >/dev/null
+assert_eq M26-decision "$(jq -r '.decision' "$DBG/$DBGLOG" 2>/dev/null)" "compressed"
+if jq -e '.stages | index("jsonl")' "$DBG/$DBGLOG" >/dev/null 2>&1; then ok; else bad M26-jsonl-stage "stages=$(jq -c '.stages' "$DBG/$DBGLOG" 2>/dev/null)"; fi
 
 # ═══ P — UserPromptSubmit prompt-json-guard ═════════════════════════════════
 # Gate (FND_PROMPT_JSON) via the extracted plugin.json command[1]; behavior by piping

@@ -381,5 +381,179 @@ check('m8-format-absent-on-error', J.slim(JSON.stringify({ errors: [{ message: '
   rmSync(dir, { recursive: true, force: true });
 }
 
+// ---------------------------------------------------------------- JSONL detection (M9) --
+// A bulk-operation line stream (one JSON value per line) is a same-shape array — parseJsonl routes
+// it into the normal pipeline instead of slim()'s non-json handback. Strict gate: every non-blank
+// line an object/array, ≥2 rows; one failing line rejects the whole payload (a truncated bulk file
+// falls back to the path handback — no partial salvage).
+check('m9-jsonl-all-objects', (() => { const r = J.parseJsonl('{"id":1,"h":"a"}\n{"id":2,"h":"b"}\n{"id":3,"h":"c"}'); return Array.isArray(r) && r.length === 3 && r[0].id === 1; })(), 'all-object lines → rows');
+check('m9-jsonl-array-rows', (() => { const r = J.parseJsonl('[1,2]\n[3,4]'); return Array.isArray(r) && r.length === 2; })(), 'object-or-array lines → rows (arrays count)');
+check('m9-jsonl-prose-line-null', J.parseJsonl('{"id":1}\nnot json here\n{"id":2}') === null, 'one prose line among JSON → null');
+check('m9-jsonl-bare-scalar-null', J.parseJsonl('42\ntrue\n7') === null, 'bare-scalar lines (42/true) → null, never swallowed as data');
+check('m9-jsonl-bare-null-null', J.parseJsonl('{"id":1}\nnull\n{"id":2}') === null, 'a bare null line is not a data row → null');
+check('m9-jsonl-single-line-null', J.parseJsonl('{"only":1}') === null, 'a single line → null (≥2 rows required)');
+check('m9-jsonl-blank-only-null', J.parseJsonl('\n  \n\t\n') === null, 'no non-blank lines → null');
+check('m9-jsonl-bom-trailing-blanks', (() => { const r = J.parseJsonl('\uFEFF{"id":1}\n{"id":2}\n\n   \n'); return Array.isArray(r) && r.length === 2; })(), 'BOM + trailing blank/whitespace lines → ok');
+
+// slim() on a JSONL string → the array flows through noise+crush; output is ONE JSON array, not
+// JSONL. Synthetic 500-row bulk-shape product dump (M1 pattern; no committed fixture) — repetitive
+// non-id content so the crush spills the tail behind a <<full=…>> marker.
+{
+  const jsonl = Array.from({ length: 500 }, (_, i) =>
+    JSON.stringify({ id: `gid://shopify/Product/${1000 + i}`, status: 'ACTIVE', vendor: 'MAC', productType: 'Lipstick', publishedAt: '2024-01-01' })).join('\n');
+  const dir = mkdtempSync(path.join(tmpdir(), 'jslim-m9-'));
+  const r = J.slim(jsonl, { spillDir: dir });
+  check('m9-slim-modified', r.wasModified && r.bytesOut < r.bytesIn, `wasModified=${r.wasModified} ${r.bytesIn}->${r.bytesOut}`);
+  check('m9-slim-is-array', (() => { try { return Array.isArray(JSON.parse(r.output)); } catch { return false; } })(), 'compressed JSONL re-serializes as ONE JSON array');
+  check('m9-slim-crush-ran', r.output.includes('_ccr_dropped'), 'crush ran (dropped rows behind a <<full=…>> marker)');
+  check('m9-slim-reduction', r.ratio >= 0.70, `≥70% reduction, got ${(r.ratio * 100).toFixed(1)}%`);
+  check('m9-slim-no-reason', r.reason === undefined && r.format === undefined, 'a compressed JSONL result carries no non-json reason/format');
+  // trace on → the pipeline records `jsonl` alongside the byte-changing stages; off ⇒ empty.
+  const rt = J.slim(jsonl, { trace: true, spillDir: dir });
+  check('m9-slim-trace-stage', rt.stages.includes('jsonl') && rt.stages.includes('crush'), `stages ${JSON.stringify(rt.stages)}`);
+  eq('m9-slim-trace-off-empty', J.slim(jsonl, { spillDir: dir }).stages, []);
+  // {jsonl:false} → today's non-json behavior, byte-identical (format still sniffed → broken-json).
+  const off = J.slim(jsonl, { jsonl: false });
+  check('m9-jsonl-off-nonjson', !off.wasModified && off.reason === 'non-json' && off.output === jsonl, 'jsonl:false → non-json passthrough, verbatim');
+  check('m9-jsonl-off-format', off.format === 'broken-json', 'jsonl:false → format still sniffed (leading { → broken-json)');
+  rmSync(dir, { recursive: true, force: true });
+}
+
+// A MIXED-type JSONL stream (object rows + array rows — parseJsonl blesses both) crushes via the
+// mixed path. Rows the dict subgroup drops must NOT vanish silently: sampleMixedArray appends ONE
+// {_ccr_dropped:…} sentinel over the whole array with a working spill handle (the M9 CLI never
+// spills the whole original the way the M2 hook does). Guards the medium-severity silent-drop bug.
+{
+  const objRows = Array.from({ length: 20 }, (_, i) => JSON.stringify({ id: i, status: 'ACTIVE', vendor: 'MAC', productType: 'Lipstick' }));
+  const arrRows = Array.from({ length: 20 }, (_, i) => JSON.stringify([i, `x${i}`, true]));
+  const jsonl = objRows.concat(arrRows).join('\n');
+  const dir = mkdtempSync(path.join(tmpdir(), 'jslim-m9mix-'));
+  const r = J.slim(jsonl, { spillDir: dir });
+  const out = JSON.parse(r.output);
+  const markers = out.filter((x) => x && typeof x === 'object' && !Array.isArray(x) && x._ccr_dropped);
+  check('m9-mixed-drop-marked', markers.length === 1 && /^<<full=.+ \d+_rows_offloaded>>$/.test(markers[0]._ccr_dropped),
+    `mixed drop must carry exactly one full= sentinel; got ${JSON.stringify(markers.map((m) => m._ccr_dropped))}`);
+  // No row is lost silently: kept real rows + offloaded count reconcile to the 40 inputs, and the
+  // spill file actually holds the dropped rows (recoverable, not a dangling handle).
+  const m = markers[0]._ccr_dropped.match(/full=(\S+) (\d+)_rows_offloaded/);
+  const spillPath = m[1], offloaded = Number(m[2]);
+  const keptReal = out.filter((x) => !(x && typeof x === 'object' && !Array.isArray(x) && x._ccr_dropped)).length;
+  check('m9-mixed-no-silent-loss', keptReal + offloaded === 40, `kept ${keptReal} + offloaded ${offloaded} != 40 inputs`);
+  check('m9-mixed-spill-roundtrips', existsSync(spillPath) && JSON.parse(readFileSync(spillPath, 'utf8')).length === offloaded,
+    `spill file must hold the ${offloaded} dropped rows`);
+  rmSync(dir, { recursive: true, force: true });
+}
+
+// non-JSONL text → unchanged non-json/format behavior; a truly truncated payload stays broken-json.
+check('m9-nonjsonl-prose-text', (() => { const r = J.slim('a plain prose line\nanother prose line'); return r.reason === 'non-json' && r.format === 'text'; })(), 'multi-line prose stays non-json/text');
+check('m9-broken-json-preserved', (() => { const r = J.slim('{"id":1,\n"unterminated'); return r.reason === 'non-json' && r.format === 'broken-json'; })(), 'a truncated JSON payload still tags broken-json (no false JSONL salvage)');
+
+// ------------------------------------------------- M9b Gate A: CLI output cap — huge JSON document --
+// One huge JSON document over the inline cap (a wide-signal crush, or a null-heavy dump that
+// noise-drops but does not sample) is spilled + summarized, never dumped to context. capOutput is the
+// CLI seam for that ONE case; the cap is overridden via cfg (NOT env) so the test needs no real whale.
+// (A JSONL file never reaches capOutput — it profiles upstream in the CLI.)
+{
+  const dir = mkdtempSync(path.join(tmpdir(), 'jslim-capA-'));
+  const arr = Array.from({ length: 30 }, (_, i) => ({ id: i, name: `entity-${i}`, blob: 'x'.repeat(40) }));
+  const output = JSON.stringify(arr);
+  const res = { output, bytesIn: 500000, bytesOut: Buffer.byteLength(output), ratio: 1 - Buffer.byteLength(output) / 500000 };
+  const cap = J.capOutput(res, '/some/bulk.jsonl', { cliOutCap: 100, spillDir: dir });
+  check('m9b-capA-fires', !!cap && typeof cap.handback === 'string' && typeof cap.spillOut === 'string', `capOutput must fire over cap: ${JSON.stringify(cap)}`);
+  check('m9b-capA-stats-line', /→ .*bytes/.test(cap.handback) && cap.handback.includes('30 rows kept'), `stats line / rows-kept missing:\n${cap.handback}`);
+  check('m9b-capA-first-row', cap.handback.includes('first row') && cap.handback.includes('"id":0'), 'first-row shape sample missing');
+  check('m9b-capA-both-paths', cap.handback.includes(cap.spillOut) && cap.handback.includes('/some/bulk.jsonl'), 'slimmed-spill + original path must both appear');
+  check('m9b-capA-jq-hint', cap.handback.includes('--jq'), '--jq narrow hint missing');
+  check('m9b-capA-spill-roundtrips', existsSync(cap.spillOut) && readFileSync(cap.spillOut, 'utf8') === output, 'spill must hold the exact slimmed output');
+  check('m9b-capA-undercap-null', J.capOutput(res, '/some/bulk.jsonl', { cliOutCap: 10_000_000, spillDir: dir }) === null, '≤ cap → null (caller prints the body unchanged)');
+  check('m9b-capA-stdin-null', J.capOutput(res, null, { cliOutCap: 100, spillDir: dir }) === null, 'no fileArg (stdin) → null even over cap (no path to point at)');
+  rmSync(dir, { recursive: true, force: true });
+}
+// spill-failure → null so the CLI falls back to printing (never lose the result)
+{
+  const badParent = path.join(mkdtempSync(path.join(tmpdir(), 'jslim-capAro-')), 'not-a-dir');
+  writeFileSync(badParent, 'x'); // a FILE — using it as a spill parent dir fails
+  const output = JSON.stringify(Array.from({ length: 10 }, (_, i) => ({ id: i })));
+  const res = { output, bytesIn: 999999, bytesOut: Buffer.byteLength(output), ratio: 0.9 };
+  check('m9b-capA-spill-fail-null', J.capOutput(res, '/some/bulk.jsonl', { cliOutCap: 10, spillDir: path.join(badParent, 'sub') }) === null, 'a spill-write failure returns null → CLI prints the body (never lose the result)');
+}
+
+// NB a JSONL FILE via the CLI never reaches capOutput at all — it profiles upstream (the CLI
+// scripts-sim J-cases cover that end-to-end). capOutput is the non-JSONL huge-document seam only.
+
+// ---------------------------------------------------------------- M9b Gate B: streaming profile --
+// profileLines feeds raw line strings through the SAME accumulator streamProfile runs over a file
+// stream — a small synthetic exercises counts / nulls / distinct-cap / samples / parse-failure
+// tolerance without a real whale (the >8 MB gate is a CLI concern, tested in scripts-sim).
+{
+  const good = Array.from({ length: 50 }, (_, i) => JSON.stringify({ id: i, status: i % 2 ? 'ACTIVE' : 'DRAFT', note: i % 5 === 0 ? null : `n${i}` }));
+  const lines = good.concat(['', '   ', 'not json at all', '42', JSON.stringify({ id: 999, extra: 'x' })]);
+  const p = J.profileLines(lines, { file: '/x/bulk.jsonl', bytes: 12345 });
+  check('m9b-prof-meta', p.profile === true && p.file === '/x/bulk.jsonl' && p.bytes === 12345, `profile meta wrong: ${JSON.stringify({ profile: p.profile, file: p.file, bytes: p.bytes })}`);
+  check('m9b-prof-rows', p.rows === 51, `object rows: got ${p.rows} (50 good + 1 extra; blanks skipped)`);
+  check('m9b-prof-parsefail-tolerated', p.parseFailures === 2, `parse failures tolerated + counted: got ${p.parseFailures} (prose line + bare scalar 42)`);
+  check('m9b-prof-presence', p.keys.id.present === 51 && p.keys.status.present === 50, `presence: ${JSON.stringify({ id: p.keys.id.present, status: p.keys.status.present })}`);
+  check('m9b-prof-nulls', p.keys.note.null === 10, `note nulls: got ${p.keys.note.null} (i%5===0 over 50 rows)`);
+  check('m9b-prof-type', p.keys.status.type === 'str', `status type: ${p.keys.status.type}`);
+  check('m9b-prof-samples', p.samples.head.length === 5 && p.samples.tail.length === 5 && p.samples.reservoir.length === 10, `sample sizes: ${JSON.stringify({ h: p.samples.head.length, t: p.samples.tail.length, r: p.samples.reservoir.length })}`);
+  check('m9b-prof-sample-content', p.samples.head[0].id === 0 && p.samples.tail[p.samples.tail.length - 1].id === 999, 'head=first rows, tail=last rows');
+}
+// distinct cap at 1000: 1500 unique values → distinct reported as 1000 with the capped flag
+{
+  const p = J.profileLines(Array.from({ length: 1500 }, (_, i) => JSON.stringify({ v: `unique-${i}` })), {});
+  check('m9b-prof-distinct-cap', p.keys.v.distinct === 1000 && p.keys.v.distinctCapped === true, `distinct cap: ${JSON.stringify(p.keys.v)}`);
+}
+// ARRAY-row JSONL (tuple rows, `[1,2,3]` per line) is legitimate bulk data — parseJsonl accepts object
+// OR array rows, so profileFeed must too. Regression: arrays were counted as parseFailures → a valid
+// array-row file profiled as rows:0/empty-keys. Now they profile by index-key ("0","1",…).
+{
+  const p = J.profileLines(['[1,2,3]', '[4,5,6]', '[7,8,9]'], { file: '/x/arr.jsonl' });
+  check('m9b-prof-array-rows', p.rows === 3 && p.parseFailures === 0, `array rows counted, not failed: ${JSON.stringify({ rows: p.rows, pf: p.parseFailures })}`);
+  check('m9b-prof-array-index-keys', !!p.keys['0'] && p.keys['0'].present === 3 && p.keys['2'].type === 'number', `index-key stats: ${JSON.stringify(p.keys)}`);
+  check('m9b-prof-array-samples', Array.isArray(p.samples.head[0]) && p.samples.head[0][0] === 1, `array rows appear verbatim in samples: ${JSON.stringify(p.samples.head[0])}`);
+}
+// A WIDE row (200 keys of long names) must NOT blow the profile past PROFILE_BYTE_CAP (8000). A count
+// cap alone doesn't bound bytes — keys are trimmed by BYTES via a binary search and the drop recorded
+// in keysTruncated. Regression: the size ladder only trimmed samples, so keys emitted 22 KB.
+{
+  const wide = {}; for (let i = 0; i < 200; i++) wide[`key_${i}_${'x'.repeat(50)}`] = `v${i}`;
+  const line = JSON.stringify(wide);
+  const p = J.profileLines([line, line, line], { file: '/x/wide.jsonl' });
+  const bytes = Buffer.byteLength(JSON.stringify(p), 'utf8');
+  check('m9b-prof-wide-cap', bytes <= 8000, `wide profile must fit the byte cap: got ${bytes} B`);
+  check('m9b-prof-wide-truncated', p.keysTruncated > 0 && Object.keys(p.keys).length < 200, `keysTruncated=${p.keysTruncated}, shown=${Object.keys(p.keys).length}`);
+  check('m9b-prof-wide-rows', p.rows === 3, `rows still counted under the cap: ${p.rows}`);
+}
+// A single monster key name (bigger than the whole cap) collapses to keys:{} with keysTruncated set —
+// the binary search converges at 0 rather than looping (the base profile without keys is tiny).
+{
+  const mega = { ['m'.repeat(20000)]: 1, b: 2 };
+  const line = JSON.stringify(mega);
+  const p = J.profileLines([line, line], { file: '/x/mega.jsonl' });
+  const bytes = Buffer.byteLength(JSON.stringify(p), 'utf8');
+  check('m9b-prof-mega-key-cap', bytes <= 8000 && Object.keys(p.keys).length === 0 && p.keysTruncated === 2, `mega key collapses under cap: ${bytes} B, shown ${Object.keys(p.keys).length}, trunc ${p.keysTruncated}`);
+}
+// streamProfile over a real (small) file — the async path the CLI Gate B uses; O(samples) memory.
+{
+  const dir = mkdtempSync(path.join(tmpdir(), 'jslim-prof-'));
+  const f = path.join(dir, 'rows.jsonl');
+  writeFileSync(f, Array.from({ length: 12 }, (_, i) => JSON.stringify({ id: i, k: `v${i}` })).join('\n') + '\n');
+  const p = await J.streamProfile(f);
+  check('m9b-streamprofile', p.profile === true && p.rows === 12 && p.file === f && p.bytes > 0, `streamProfile: ${JSON.stringify({ rows: p.rows, file: p.file, bytes: p.bytes })}`);
+  rmSync(dir, { recursive: true, force: true });
+}
+// Gate-A output spill (fnd-slim-out-*) is swept by the same mtime TTL — stale gone, fresh kept.
+{
+  const dir = mkdtempSync(path.join(tmpdir(), 'jslim-sweepout-'));
+  const seed = (name, old) => { const p = path.join(dir, name); writeFileSync(p, '[]'); if (old) utimesSync(p, 1000, 1000); return p; };
+  const stale = seed('fnd-slim-out-STALE.json', true);
+  const fresh = seed('fnd-slim-out-FRESH.json', false);
+  const r = J.sweepSpills(dir);
+  check('m9b-sweep-out-stale', !existsSync(stale), 'stale fnd-slim-out-* must be swept');
+  check('m9b-sweep-out-fresh', existsSync(fresh), 'fresh fnd-slim-out-* must survive');
+  check('m9b-sweep-out-summary', r.swept === 1, `summary ${JSON.stringify(r)}`);
+  rmSync(dir, { recursive: true, force: true });
+}
+
 console.log(`json-slim fixtures: ${pass} passed, ${fail} failed  (parity ${byteExact} byte-exact + ${valueOnly} value-parity of 17)`);
 if (fail) { console.log(failures.join('\n')); process.exit(1); }

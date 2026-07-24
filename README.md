@@ -389,7 +389,18 @@ hook error never blocks work:
   hands over the path; the session convention and the reader agents route that file through the
   same compressor on demand (`node scripts/json-slim.cjs <path>`, `--stats` to see the cut). If
   that file isn't JSON the CLI hands the path back instead of re-dumping it, so the caller reads
-  it directly. **Why wasn't a result compressed?**
+  it directly. A **JSONL** file (one JSON object per line, e.g. a Shopify bulk-operation dump) is
+  handled apart: the CLI never compresses it and never prints its rows — at ANY size it returns a
+  **PROFILE** (row + parse-failure counts, per-key `{present, null, type, distinct}`, and head/tail/
+  reservoir sample rows) plus guidance to query the ORIGINAL file by line — a `readline` filter (the
+  sample rows show the shape to write it against) or `sed -n '<N>p'` / `grep`. Never raw-`Read` a big
+  JSONL: a sampled subset can't answer analytical questions whose answers live in rows the sample skips.
+  Files ≤ 8 MB profile the parsed rows; larger ones stream via `readline` (never loaded whole) — the
+  same PROFILE either way. `--jq <path>` extracts a single value from a ≤ 8 MB JSONL; on a larger one it
+  is refused (it would re-read the whole file). A **non-JSONL** JSON document keeps the normal slim
+  behavior, plus a guard: if its slimmed body still exceeds ~48 KB it is spilled to a `fnd-slim-out-*`
+  file and handed back as a one-line summary + the first element + both paths (`--jq <path>` to narrow),
+  never dumped inline. **Why wasn't a result compressed?**
   set `FND_MCP_SLIM_DEBUG=1`, re-run, and read `<FND_MCP_SLIM_DIR>/fnd-mcp-slim-debug.log` — one
   JSONL line per call records the `decision` and, on a passthrough, the `reason` (`size-gate`,
   `error-shape`, `non-json`, `unrecognized-shape`, `no-gain`, …). A `non-json` line also carries a
