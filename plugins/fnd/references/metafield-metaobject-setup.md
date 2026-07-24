@@ -20,7 +20,8 @@ Acceptance Criteria.
 - **Two modes.** Mode 1 — store API access exists (CLI ≥ 4.x `shopify store auth`, or an
   Admin API token): inspection and mutations run via `scripts/shopify-admin-gql.sh`.
   Mode 2 — no access: a living `.graphql` file the developer runs step-by-step in the
-  Shopify GraphiQL App; in an autonomous run that exchange must **complete before the ✋
+  Shopify GraphiQL App — each step handed as a ready-to-run file in the workspace `tmp/`,
+  never a chat snippet; in an autonomous run that exchange must **complete before the ✋
   gate** (the run can't pause for manual steps).
 - **Access is classified, never assumed:** `read_*`-only scopes → inspection works fully,
   mutations go to the developer (Mode 2); a confirmed `write_*` scope → Mode 1 mutations.
@@ -48,8 +49,9 @@ Pick based on whether you have **store API access** (either kind — see **Store
   `shopify.theme.toml`); the runner consumes credentials without exposing them.
 - **Mode 2 — no store access.** Produce a **single living `.graphql` file** the developer runs by hand in
   the **Shopify GraphiQL App** (Shopify admin → Apps → *Shopify GraphiQL App*). Hand them **one
-  step at a time**; they paste back the JSON result, you read the returned **gid**, fill it into
-  the next step, mark the step done, and advance. The file is the source of truth and the run log.
+  step at a time — as a ready-to-run file in the task workspace, never as a chat snippet**
+  (→ *Handing a step*); they paste back the JSON result, you read the returned **gid**, fill it
+  into the next step, mark the step done, and advance. The file is the source of truth and the run log.
 
 Either way the **step skeleton is identical** — only who-runs-it differs.
 
@@ -178,6 +180,19 @@ ticket-scoped working files never ship with the branch
 - **Update it as you go**: when the developer pastes a result, mark that step `✅ DONE` with the
   returned gid inline, paste the gid into the dependent step(s), and move the RUN ORDER pointer
   forward. Keep it accurate enough that someone could re-run the whole thing from the file alone.
+
+### Handing a step — file, not chat
+
+Never paste a GraphQL operation into the chat for the developer to copy — terminal wrapping
+mangles it and copying from chat is awkward. Write the current step as a **standalone
+ready-to-run file** in `.claude/fnd/<work-id>/tmp/step-<n>-<short-name>.graphql`: exactly one
+operation, every `REPLACE_WITH_*` placeholder already filled from prior results, runnable as-is.
+In chat give only the **file path**, one line on what the step does, and the scope it needs; the
+developer copies it from the file (or the IDE), runs it in GraphiQL, and pastes the JSON result
+back. This applies to **every** query or mutation handed to the developer to run manually —
+Mode 2 steps, one-off inspection reads, and mutations on a read-scope-only store alike. The
+living file stays the source of truth: sync gids and step status into it as usual; the `tmp/`
+step files are disposable copies.
 
 ## Verifying data-driven Acceptance Criteria (mutate to test)
 

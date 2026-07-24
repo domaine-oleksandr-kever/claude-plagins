@@ -24,7 +24,7 @@ the **ticket key** (`ELC-206`) for single-ticket work; for a **batch shipping as
 | `plan.md` | the **approved implementation plan**, verbatim | `develop-feature-or-fix`, at its ✋ checkpoint |
 | `qa.md` | the **approved QA checklist**, then the pass/fail report + confirmed findings with their repro values | `qa-feature-or-fix` |
 | `steps-to-test.md` | the **approved Steps to Test** (local copy of what went to Jira) | `write-steps-to-test` |
-| `metaobject-setup.graphql` | the Mode 2 living data-model setup file (`references/metafield-metaobject-setup.md`); inspection drafts go in `tmp/` | `develop-feature-or-fix` |
+| `metaobject-setup.graphql` | the Mode 2 living data-model setup file (`references/metafield-metaobject-setup.md`); inspection drafts and per-step hand-off copies go in `tmp/` | `develop-feature-or-fix` |
 | `notes.md` | append-only dated log: checkpoint decisions, gotchas, provisioned metafield/metaobject gids, preview theme name/id, test page paths; in a batch — root cause + fix summary per bug | any skill, at natural boundaries |
 | `progress.md` | work checklist — what's done, what's next (date + one-line status) | every series skill, at completion |
 | `tmp/` | scratch made while working — test scripts, query drafts, JSON dumps, screenshots — instead of littering the project root | anyone; delete freely |
