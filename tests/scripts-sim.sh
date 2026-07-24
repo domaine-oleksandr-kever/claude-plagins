@@ -543,5 +543,143 @@ rc=0; FND_MCP_SLIM_DIR="$LOGD" node "$SLIM" "$TSHF" >"$O" 2>"$E" || rc=$?
 if [ "$rc" -eq 0 ] && grep -Fq "read the file directly: $TSHF" "$O" && ! grep -q 'lines omitted' "$O"; then ok
 else bad L3-error-prose-passthrough "rc=$rc inb=$inb head=$(head -c 160 "$O")"; fi
 
+# ---------------------------------------------- json-slim.cjs: fenced-payload unwrap (M11) --
+# A tool wraps its payload in prose + a markdown fence ("Script ran…\n```json\n<payload>\n```",
+# chrome-devtools evaluate_script). The CLI must see THROUGH the wrapper: unwrap the dominant fence,
+# re-run the pipeline on the body, keep the preamble on top. Real docs with small code blocks stay
+# byte-identical; a fenced JSONL body still PROFILES (never crushed) with offset-corrected guidance.
+FND="$TMP/fence"; mkdir -p "$FND"
+
+# F1: a fenced JSON wrapper whose slimmed body still exceeds the 48 KB inline cap → Gate A spill +
+# summary naming BOTH the original wrapper and the slimmed spill (the real-whale shape), never
+# "nothing to compress", stdout small.
+F1F="$FND/whale.txt"
+node -e '
+  const fs=require("fs");
+  const prod=(i)=>{const o={id:i}; for(let j=0;j<200;j++) o["f"+j]= j%2 ? null : "value-"+i+"-"+j+"-pad"; return o;};
+  const obj={products:Array.from({length:60},(_,i)=>prod(i))};
+  fs.writeFileSync(process.argv[1], "Script ran on page and returned:\n```json\n"+JSON.stringify(obj)+"\n```");
+' "$F1F"
+F1OUT="$FND/f1out"; mkdir -p "$F1OUT"
+rc=0; FND_MCP_SLIM_DIR="$F1OUT" node "$SLIM" "$F1F" >"$O" 2>"$E" || rc=$?
+outb=$(wc -c < "$O" | tr -d ' ')
+slimspill=$(ls "$F1OUT" 2>/dev/null | grep -c '^fnd-slim-out-' || true)
+if [ "$rc" -eq 0 ] && grep -q 'spilled, not printed' "$O" && grep -q "$F1F" "$O" \
+   && [ "$slimspill" -eq 1 ] && [ "$outb" -le 1200 ] && ! grep -q 'nothing to compress' "$O" \
+   && ! grep -q '"profile"' "$O"; then ok
+else bad F1-fence-gateA "rc=$rc outb=$outb spills=$slimspill head=$(head -c 160 "$O")"; fi
+
+# F1b–F1d (M11): the Gate-A spill for a FENCED whale must be valid JSON (spill the JSON body, NOT
+# the "Script ran…" prose preamble), the handback must sample a REAL row (not "shape: (none)"), and the
+# advertised `--jq <path> <spill>` recovery must not error on the preamble. A spill carrying the
+# preamble would make the sampler + the --jq command both hit `input is not valid JSON`.
+F1SPILL="$F1OUT/$(ls "$F1OUT" 2>/dev/null | grep '^fnd-slim-out-' | head -1)"
+if [ -f "$F1SPILL" ] && node -e 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))' "$F1SPILL" 2>/dev/null; then ok
+else bad F1b-spill-valid-json "spill not valid JSON: $F1SPILL"; fi
+if grep -Eq '(shape|first row): \{' "$O" && ! grep -q '(none)' "$O"; then ok
+else bad F1c-sample-real "no real sample: $(grep -E 'shape|first row' "$O" | head -1)"; fi
+rc=0; node "$SLIM" --jq products "$F1SPILL" >/dev/null 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && ! grep -q 'input is not valid JSON' "$E"; then ok
+else bad F1d-jq-spill "rc=$rc err=$(head -c 120 "$E")"; fi
+
+# F5 (M11): `--jq <path>` on the ORIGINAL fenced wrapper file (not just the spill) must unwrap the
+# dominant fence and narrow into the body — without the unwrap, the --jq path JSON.parses the raw file
+# and errors on the prose preamble ("input is not valid JSON: Unexpected token 'S'").
+rc=0; node "$SLIM" --jq products "$F1F" >/dev/null 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && ! grep -q 'input is not valid JSON' "$E"; then ok
+else bad F5-jq-original-fence "rc=$rc err=$(head -c 120 "$E")"; fi
+
+# F6 (M11): a >8 MB FENCED JSONL whale hits Gate B (stream-profile). The guidance must be offset-
+# aware — rows begin at line 3, the readline loader tolerates the wrapper (try/parse), parseFailures is
+# 0 — so the emitted loader does not crash on the prose/fence lines. A raw (non-offset) profile would
+# count the wrapper as parseFailures and emit a STRICT loader that throws on the first line.
+F6F="$FND/big-fenced.jsonl"
+node -e '
+  const fs=require("fs");
+  const parts=["Script returned:\n```jsonl\n"];
+  for(let i=0;i<120000;i++) parts.push(JSON.stringify({id:i,handle:"product-"+i,status:"ACTIVE",vendor:"MAC",title:"Item number "+i})+"\n");
+  parts.push("```\n");
+  fs.writeFileSync(process.argv[1], parts.join(""));
+' "$F6F"
+f6sz=$(wc -c < "$F6F" | tr -d ' ')
+F6OUT="$FND/f6out"; mkdir -p "$F6OUT"
+rc=0; FND_MCP_SLIM_DIR="$F6OUT" node "$SLIM" "$F6F" >"$O" 2>"$E" || rc=$?
+# adapt the emitted offset-aware loader (predicate → keep only the first + last id) and run it: it must
+# emit both handles despite the wrapper lines, proving the tolerant loader works over the fenced whale.
+NL6="$(grep 'node -e' "$O" | sed 's#/\* filter[^*]*\*/#(o.id<1||o.id>119998)#')"
+n6="$(eval "$NL6" 2>/dev/null || true)"
+if [ "$rc" -eq 0 ] && [ "$f6sz" -gt 8388608 ] && grep -q '"profile":true' "$O" \
+   && grep -q 'begin at line 3' "$O" && grep -q 'try{o=JSON.parse' "$O" \
+   && grep -q '"parseFailures":0' "$O" \
+   && printf '%s' "$n6" | grep -q 'product-0' && printf '%s' "$n6" | grep -q 'product-119999'; then ok
+else bad F6-big-fenced-jsonl "rc=$rc sz=$f6sz n6=[$(printf '%s' "$n6" | head -c 40)] head=$(head -c 200 "$O")"; fi
+
+# F7 (M11): a substantive trailer AFTER the closing fence (e.g. a truncation note) must be carried
+# into the compressed output, not silently dropped — slim() re-emits preamble + body + trailer.
+F7F="$FND/trailer.txt"
+node -e '
+  const fs=require("fs");
+  const arr=Array.from({length:500},(_,i)=>({id:i,status:"ACTIVE",vendor:"MAC",note:null}));
+  fs.writeFileSync(process.argv[1], "Result:\n```json\n"+JSON.stringify({products:arr})+"\n```\nNOTE: results were truncated at 500 rows for safety.");
+' "$F7F"
+F7OUT="$FND/f7out"; mkdir -p "$F7OUT"
+rc=0; FND_MCP_SLIM_DIR="$F7OUT" node "$SLIM" "$F7F" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && [ "$(head -1 "$O")" = "Result:" ] \
+   && grep -Fq 'NOTE: results were truncated at 500 rows for safety.' "$O" \
+   && ! grep -q 'nothing to compress' "$O"; then ok
+else bad F7-trailer-preserved "rc=$rc first=$(head -1 "$O") tail=$(tail -1 "$O")"; fi
+
+# F2: a fenced JSON wrapper whose crushed body fits under the cap → the preamble is emitted on TOP,
+# then the crushed JSON inline (smaller than the input), no spill, never "nothing to compress".
+F2F="$FND/small.txt"
+node -e '
+  const fs=require("fs");
+  const arr=Array.from({length:500},(_,i)=>({id:i,status:"ACTIVE",vendor:"MAC",note:null}));
+  fs.writeFileSync(process.argv[1], "Script ran on page and returned:\n```json\n"+JSON.stringify({products:arr})+"\n```");
+' "$F2F"
+inb=$(wc -c < "$F2F" | tr -d ' ')
+F2OUT="$FND/f2out"; mkdir -p "$F2OUT"
+rc=0; FND_MCP_SLIM_DIR="$F2OUT" node "$SLIM" "$F2F" >"$O" 2>"$E" || rc=$?
+outb=$(wc -c < "$O" | tr -d ' ')
+firstline="$(head -1 "$O")"
+crushspill=$(ls "$F2OUT" 2>/dev/null | grep -cE '^fnd-(crush|slim-out)-' || true)
+if [ "$rc" -eq 0 ] && [ "$firstline" = "Script ran on page and returned:" ] && [ "$outb" -lt "$inb" ] \
+   && ! grep -q 'nothing to compress' "$O" && ! grep -q '"profile":true' "$O" \
+   && node -e 'const fs=require("fs");const t=fs.readFileSync(process.argv[1],"utf8").split("\n").slice(1).join("\n");process.exit(Array.isArray(JSON.parse(t).products)?0:1)' "$O"; then ok
+else bad F2-fence-inline "rc=$rc first=[$firstline] in=$inb out=$outb spills=$crushspill"; fi
+
+# F3: a markdown docs-chunk with a SMALL code block is not a dominant fence — byte-identical passthrough
+# (the CLI hands the path back, never compresses/mangles it, never a profile).
+F3F="$FND/doc.md"
+printf '## Fetching products\n\nUse the products connection to page through a catalogue. Each edge exposes a cursor and a node id.\n```graphql\nquery { products(first: 10) { edges { node { id } } } }\n```\nPagination is cursor-based; keep requesting until hasNextPage is false. See the reference for the rest.\n' > "$F3F"
+rc=0; FND_MCP_SLIM_DIR="$FND" node "$SLIM" "$F3F" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -Fq "read the file directly: $F3F" "$O" && ! grep -q 'lines omitted' "$O" \
+   && ! grep -q '"profile"' "$O"; then ok
+else bad F3-docs-passthrough "rc=$rc head=$(head -c 160 "$O")"; fi
+
+# F4: a JSONL body wrapped in a fence via the CLI → PROFILE (never crushed), with the guidance's line
+# hints CORRECTED for the wrapper offset (rows begin at line 3; loader skips 2 wrapper lines). No
+# _ccr_dropped / <<full= (crush never ran), no spill. The offset-corrected readline template must run.
+F4F="$FND/fenced.jsonl"
+node -e '
+  const fs=require("fs");
+  const rows=Array.from({length:20},(_,i)=>JSON.stringify({id:`gid://shopify/Product/${1000+i}`,handle:`product-${i}`,children:i%3?null:[i]}));
+  fs.writeFileSync(process.argv[1], "Bulk export returned:\n```jsonl\n"+rows.join("\n")+"\n```");
+' "$F4F"
+F4OUT="$FND/f4out"; mkdir -p "$F4OUT"
+before="$(ls "$F4OUT")"
+rc=0; FND_MCP_SLIM_DIR="$F4OUT" node "$SLIM" "$F4F" >"$O" 2>"$E" || rc=$?
+after="$(ls "$F4OUT")"
+spills=$(ls "$F4OUT" 2>/dev/null | grep -cE '^fnd-(crush|slim-out)-' || true)
+# adapt the fence-aware node -e loader and run it — it must emit handles despite the prose/fence lines
+NODELINE="$(grep 'node -e' "$O" | sed 's#/\* filter[^*]*\*/#true#')"
+nout="$(eval "$NODELINE" 2>/dev/null || true)"
+if [ "$rc" -eq 0 ] && grep -q '"profile":true' "$O" && grep -q 'inside a ```' "$O" \
+   && grep -q 'begin at line 3' "$O" && grep -q "$F4F" "$O" \
+   && ! grep -q '_ccr_dropped' "$O" && ! grep -q '<<full=' "$O" \
+   && [ "$spills" -eq 0 ] && [ "$before" = "$after" ] \
+   && printf '%s' "$nout" | grep -q 'product-0' && printf '%s' "$nout" | grep -q 'product-19'; then ok
+else bad F4-fenced-jsonl-profile "rc=$rc spills=$spills nout=[$(printf '%s' "$nout" | head -c 40)] head=$(head -c 200 "$O")"; fi
+
 echo "scripts-sim: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then printf '%s' "$failures"; exit 1; fi

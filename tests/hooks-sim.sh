@@ -484,6 +484,32 @@ run_dbg "$DBG" "$in" >/dev/null
 assert_eq M28-decision "$(jq -r '.decision' "$DBG/$DBGLOG" 2>/dev/null)" "compressed"
 if jq -e '.stages | index("log")' "$DBG/$DBGLOG" >/dev/null 2>&1; then ok; else bad M28-log-stage "stages=$(jq -c '.stages' "$DBG/$DBGLOG" 2>/dev/null)"; fi
 
+# ── M29–M30: fenced-payload unwrap (M11) ─────────────────────────────────────
+# A tool result whose text is a DOMINANT markdown fence (prose preamble + ```json\n<payload>\n```,
+# e.g. chrome-devtools evaluate_script) hides a compressible body from the whole pipeline. The hook
+# must unwrap it, crush the body, and keep the preamble on top — updatedToolOutput + a full= recovery
+# spill (the whole ORIGINAL wrapper) — and, with DEBUG on, record the `fence` stage. Generated in-test.
+FJB="$(node -e '
+  const obj={products:Array.from({length:600},(_,i)=>({id:i,note:"padding-padding-padding-padding"}))};
+  process.stdout.write("Script ran on page and returned:\n```json\n"+JSON.stringify(obj)+"\n```");
+')"
+in="$(jq -n --arg t "$FJB" '{tool_name:"mcp__plugin_fnd_chrome-devtools-mcp__evaluate_script",tool_response:{content:[{type:"text",text:$t}]}}')"
+
+# M29: a >4 KB fenced-JSON tool result → updatedToolOutput carrying a full= spill that exists on disk,
+# and the emitted body keeps the prose preamble on top (still reads as what the tool said).
+out="$(run_slim "$in")"
+assert_contains M29-updated "$out" "updatedToolOutput"
+text="$(printf '%s' "$out" | jq -r '.hookSpecificOutput.updatedToolOutput.content[0].text' 2>/dev/null)"
+p="$(printf '%s' "$text" | grep -o 'full=[^ >]*' | head -1 | sed 's/^full=//')"
+if [ -n "$p" ] && [ -f "$p" ]; then ok; else bad M29-fullfile "no existing full= file (p='$p')"; fi
+if printf '%s' "$text" | head -1 | grep -Fq "Script ran on page and returned:"; then ok; else bad M29-preamble "preamble not kept on top: $(printf '%s' "$text" | head -c 60)"; fi
+
+# M30: DEBUG on → the emitted line is `compressed` and its stages include `fence`
+DBG="$TMP/dbg-m30"; mkdir -p "$DBG"
+run_dbg "$DBG" "$in" >/dev/null
+assert_eq M30-decision "$(jq -r '.decision' "$DBG/$DBGLOG" 2>/dev/null)" "compressed"
+if jq -e '.stages | index("fence")' "$DBG/$DBGLOG" >/dev/null 2>&1; then ok; else bad M30-fence-stage "stages=$(jq -c '.stages' "$DBG/$DBGLOG" 2>/dev/null)"; fi
+
 # ═══ P — UserPromptSubmit prompt-json-guard ═════════════════════════════════
 # Gate (FND_PROMPT_JSON) via the extracted plugin.json command[1]; behavior by piping
 # UserPromptSubmit-shaped input to the hook. $shim/$fake come from the G/M scaffolding.

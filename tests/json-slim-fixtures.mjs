@@ -814,5 +814,136 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
   check('log-trailer-info-count-is-dropped', /\b57 INFO\b/.test(trailer), `INFO count must be the 57 dropped (60 total − 3 kept context), got ${JSON.stringify(trailer)}`);
 }
 
+// ================================================================ M11 — fenced-payload unwrap ==
+// A tool wraps its payload in prose + a markdown fence ("Script ran…\n```json\n<payload>\n```",
+// chrome-devtools evaluate_script) which the whole JSON pipeline can't parse. unwrapFence detects a
+// DOMINANT fence (body ≥ 80% of bytes) and slim() re-runs the pipeline on the body, preamble on top;
+// an incompressible / minority fence leaves the WHOLE original byte-identical.
+{
+  const payload = JSON.stringify({ products: Array.from({ length: 40 }, (_, i) => ({ id: i, note: 'x'.repeat(40) })) });
+  const wrapped = `Script ran on page and returned:\n\`\`\`json\n${payload}\n\`\`\``;
+  // unwrapFence unit — a dominant fenced body: verbatim body, kept preamble, physical-line offset
+  const uw = J.unwrapFence(wrapped);
+  check('m11-unwrap-body', uw && uw.body === payload, 'dominant fence → body is the payload verbatim');
+  check('m11-unwrap-preamble', uw && uw.preamble === 'Script ran on page and returned:', `preamble kept: ${JSON.stringify(uw && uw.preamble)}`);
+  check('m11-unwrap-offset', uw && uw.offset === 2, `offset = physical lines before the body (prose + fence = 2), got ${uw && uw.offset}`);
+  // no-preamble fence (opening fence is line 0) → empty preamble, offset 1
+  const uw0 = J.unwrapFence(`\`\`\`json\n${payload}\n\`\`\``);
+  check('m11-unwrap-no-preamble', uw0 && uw0.preamble === '' && uw0.offset === 1, `no-preamble: preamble=${JSON.stringify(uw0 && uw0.preamble)} offset=${uw0 && uw0.offset}`);
+  // dominance guard — a docs chunk whose code block is a MINORITY of bytes → null (byte-identical doc)
+  const doc = ['## Fetching products', '', 'Use the products connection to page through a catalogue. Each edge exposes a cursor and a node.', '```graphql', 'query { products(first: 10) { edges { node { id } } } }', '```', 'Pagination is cursor-based; keep requesting until hasNextPage is false. See the reference.'].join('\n');
+  check('m11-dominance-guard', J.unwrapFence(doc) === null, 'a small code block in a doc is not dominant → null');
+  // unterminated fence → null (old behavior); tilde fence → null (unsupported, no crash); long trailer → null
+  check('m11-unterminated', J.unwrapFence(`intro\n\`\`\`json\n${payload}`) === null, 'no closing fence → null');
+  check('m11-tilde-null', J.unwrapFence(`intro\n~~~json\n${payload}\n~~~`) === null, 'tilde fence → null (no crash)');
+  check('m11-long-trailer', J.unwrapFence(`\`\`\`json\n${payload}\n\`\`\`\na\nb\nc\nd\ne`) === null, 'a long trailer → not a single dominant fence → null');
+  // opening fence past the preamble window → null (a deep-in-a-doc fence is never unwrapped)
+  check('m11-preamble-window', J.unwrapFence(`a\nb\nc\nd\n\`\`\`json\n${payload}\n\`\`\``) === null, 'opening fence after the preamble window → null');
+
+  // slim() on a fenced JSON payload → compressed, preamble on top, trace stages lead with 'fence'
+  const r = J.slim(wrapped, { trace: true });
+  check('m11-slim-json-compresses', r.wasModified && r.bytesOut < r.bytesIn, `fenced JSON compresses: ${r.bytesIn}→${r.bytesOut}`);
+  check('m11-slim-json-preamble', r.output.startsWith('Script ran on page and returned:\n'), 'preamble kept on top of the slimmed body');
+  check('m11-slim-json-stages', r.stages[0] === 'fence' && r.stages.includes('crush'), `stages lead with 'fence' + include 'crush', got ${JSON.stringify(r.stages)}`);
+  check('m11-slim-body-parses', (() => { try { return Array.isArray(JSON.parse(r.output.slice(r.output.indexOf('\n') + 1)).products); } catch { return false; } })(), 'the slimmed body under the preamble is valid crushed JSON');
+  // {fence:false} → byte-identical non-json passthrough; trace off → compressed but stages empty
+  const off = J.slim(wrapped, { fence: false });
+  check('m11-fence-off', !off.wasModified && off.reason === 'non-json' && off.output === wrapped, 'fence:false → byte-identical non-json passthrough');
+  const noTrace = J.slim(wrapped, { fence: true, trace: false });
+  check('m11-trace-off-empty', noTrace.wasModified && noTrace.stages.length === 0, 'trace off → compressed but stages stays empty');
+  // docs chunk with a small code block → byte-identical passthrough (dominance guard end-to-end)
+  const dr = J.slim(doc);
+  check('m11-docs-passthrough', !dr.wasModified && dr.reason === 'non-json' && dr.output === doc, 'docs-chunk with a small code block → byte-identical passthrough');
+  // a DOMINANT fence whose body is NOT compressible (a big graphql query) → WHOLE original byte-identical
+  const bigQuery = 'query {\n' + Array.from({ length: 400 }, (_, i) => `  field_${i}(first: 10) { edges { node { id title handle } } }`).join('\n') + '\n}';
+  const fencedQuery = `Here is the generated query:\n\`\`\`graphql\n${bigQuery}\n\`\`\``;
+  const qr = J.slim(fencedQuery);
+  check('m11-dominant-incompressible', !qr.wasModified && qr.output === fencedQuery, 'a dominant but incompressible fenced body → whole original unchanged (never a bare unwrapped body)');
+
+  // fenced JSONL body via slim (the HOOK path) → crushed as one array, stages ['fence','jsonl','crush']
+  const jsonlBody = Array.from({ length: 400 }, (_, i) => JSON.stringify({ id: i, status: 'ACTIVE', vendor: 'MAC', note: 'x'.repeat(20) })).join('\n');
+  const fencedJsonl = `Bulk export returned:\n\`\`\`jsonl\n${jsonlBody}\n\`\`\``;
+  const dir = mkdtempSync(path.join(tmpdir(), 'jslim-m11-'));
+  const rj = J.slim(fencedJsonl, { trace: true, spillDir: dir });
+  check('m11-fenced-jsonl-crush', rj.wasModified && rj.bytesOut < rj.bytesIn, 'fenced JSONL via slim (hook) crushes like an array');
+  eq('m11-fenced-jsonl-stages', rj.stages, ['fence', 'jsonl', 'crush']);
+  check('m11-fenced-jsonl-sentinel', rj.output.includes('_ccr_dropped'), 'crush sentinel present (rows offloaded, not printed)');
+  rmSync(dir, { recursive: true, force: true });
+
+  // fenced log text via slim → signal-selected, stages ['fence','log'], ERROR kept, logCompressed rides
+  const logBody = Array.from({ length: 300 }, () => '[WARN] frame budget exceeded: draw skipped').join('\n') + '\n[ERROR] renderer teardown\n[ERROR] device lost';
+  const fencedLog = `Console output:\n\`\`\`\n${logBody}\n\`\`\``;
+  const rlog = J.slim(fencedLog, { trace: true });
+  eq('m11-fenced-log-stages', rlog.stages, ['fence', 'log']);
+  check('m11-fenced-log-error-kept', rlog.wasModified && rlog.output.includes('[ERROR] renderer teardown'), 'fenced log signal-selects, ERROR kept');
+  check('m11-fenced-log-logcompressed', rlog.logCompressed === true, 'logCompressed flag propagates through the fence');
+
+  // ── M11 fenced-result invariants ──────────────────────────────────────────────────────────────
+  // A FENCED result over the inline cap: capOutput must spill ONLY the pure JSON body (so the
+  // fnd-slim-out-* spill parses and the advertised `--jq <spill>` recovery works) and sample a REAL
+  // row, with the prose preamble + trailer riding on the handback. A spill that carried the
+  // "Script ran…" preamble would be invalid JSON and sample `shape: (none)`.
+  const capDir = mkdtempSync(path.join(tmpdir(), 'jslim-m11cap-'));
+  const capRes = J.slim(`Script ran on page and returned:\n\`\`\`json\n${payload}\n\`\`\`\nNOTE: truncated.`, { spillDir: capDir });
+  const cap = J.capOutput(capRes, path.join(capDir, 'whale.txt'), { cliOutCap: 50, spillDir: capDir });
+  check('m11-cap-spill-valid-json', !!cap && (() => { try { return Array.isArray(JSON.parse(readFileSync(cap.spillOut, 'utf8')).products); } catch { return false; } })(), 'Gate-A spill of a fenced result is valid JSON (body only, preamble stripped)');
+  check('m11-cap-sample-real', !!cap && /(shape|first row): \{/.test(cap.handback) && !cap.handback.includes('(none)'), `handback samples a real row, not (none): ${cap && cap.handback.split('\n').find((l) => /shape|first row/.test(l))}`);
+  check('m11-cap-preamble-top', !!cap && cap.handback.startsWith('Script ran on page and returned:\n'), 'the tool prose preamble rides on top of the Gate-A handback');
+  check('m11-cap-trailer-kept', !!cap && cap.handback.includes('NOTE: truncated.'), 'the fenced trailer rides on the Gate-A handback');
+  // a NON-fenced result: capOutput spills res.output unchanged (no regression), no preamble line
+  const plainRes = J.slim(JSON.stringify(Array.from({ length: 60 }, (_, i) => ({ id: i, note: 'y'.repeat(60) }))), { spillDir: capDir });
+  const capPlain = J.capOutput(plainRes, path.join(capDir, 'plain.json'), { cliOutCap: 50, spillDir: capDir });
+  check('m11-cap-plain-unchanged', !!capPlain && readFileSync(capPlain.spillOut, 'utf8') === plainRes.output && !/^\n/.test(capPlain.handback), 'a non-fenced result still spills res.output verbatim, no preamble prepended');
+  rmSync(capDir, { recursive: true, force: true });
+
+  // A CRLF-delimited fence still unwraps and compresses (the fence regex tolerates a trailing \r).
+  const crlf = `Script ran on page and returned:\r\n\`\`\`json\r\n${payload}\r\n\`\`\``;
+  const uwc = J.unwrapFence(crlf);
+  check('m11-crlf-unwrap', !!uwc && (() => { try { return Array.isArray(JSON.parse(uwc.body).products); } catch { return false; } })(), 'CRLF-delimited fence unwraps, body parses');
+  const rcrlf = J.slim(crlf, { trace: true });
+  check('m11-crlf-compresses', rcrlf.wasModified && rcrlf.stages[0] === 'fence' && rcrlf.stages.includes('crush'), `CRLF fenced JSON compresses via the fence branch: ${JSON.stringify(rcrlf.stages)}`);
+
+  // A substantive trailer after the closing fence is captured and carried into the output; a
+  // bare trailing newline is NOT a trailer.
+  const withTrailer = `Result:\n\`\`\`json\n${payload}\n\`\`\`\nNOTE: truncated at 40 rows.`;
+  const uwt = J.unwrapFence(withTrailer);
+  check('m11-trailer-captured', !!uwt && uwt.trailer === 'NOTE: truncated at 40 rows.', `trailer captured: ${JSON.stringify(uwt && uwt.trailer)}`);
+  const rt = J.slim(withTrailer);
+  check('m11-trailer-in-output', rt.wasModified && rt.output.endsWith('NOTE: truncated at 40 rows.'), 'trailer carried into the compressed output');
+  const uwn = J.unwrapFence(`Result:\n\`\`\`json\n${payload}\n\`\`\`\n`);
+  check('m11-trailing-newline-not-trailer', !!uwn && uwn.trailer === '', `a bare final newline is not a trailer: ${JSON.stringify(uwn && uwn.trailer)}`);
+
+  // Offset-aware stream profiling (Gate B): skipLeading + fenceAware skip the fence wrapper so a
+  // fenced JSONL whale profiles only its real rows (parseFailures 0), matching the ≤8 MB unwrap path.
+  // Without the opts the raw stream counts the wrapper lines as parse failures — the contrast the
+  // raw-profile check below pins.
+  const spDir = mkdtempSync(path.join(tmpdir(), 'jslim-m11sp-'));
+  const spFile = path.join(spDir, 'fenced.jsonl');
+  writeFileSync(spFile, `Script returned:\n\`\`\`jsonl\n${Array.from({ length: 10 }, (_, i) => JSON.stringify({ id: i, handle: 'p' + i })).join('\n')}\n\`\`\`\n`);
+  const profFence = await J.streamProfile(spFile, {}, { skipLeading: 2, fenceAware: true });
+  const profRaw = await J.streamProfile(spFile, {});
+  check('m11-streamprofile-fence-skips-wrapper', profFence.parseFailures === 0 && profFence.rows === 10, `fence-aware profile: failures=${profFence.parseFailures} rows=${profFence.rows}`);
+  check('m11-streamprofile-raw-counts-wrapper', profRaw.parseFailures > 0, `raw profile counts the wrapper lines as failures: ${profRaw.parseFailures}`);
+  rmSync(spDir, { recursive: true, force: true });
+
+  // A BOM-prefixed opening fence must be detected by the shared findOpeningFence helper (it strips a
+  // leading BOM before matching) so the ≤8 MB unwrap path and the >8 MB Gate B scan classify a
+  // BOM+fenced whale identically — the raw FENCE_OPEN regex alone misses the "﻿```json" line.
+  const bomLines = ['﻿```json', JSON.stringify({ a: 1 }), '```'];
+  check('m11-bom-fence-helper', J.findOpeningFence(bomLines, 3) === 0, `findOpeningFence detects a BOM-prefixed fence at 0: ${J.findOpeningFence(bomLines, 3)}`);
+  const bomUnwrap = J.unwrapFence(`﻿\`\`\`json\n${payload}\n\`\`\``);
+  check('m11-bom-fence-unwrap', !!bomUnwrap && (() => { try { return Array.isArray(JSON.parse(bomUnwrap.body).products); } catch { return false; } })(), 'unwrapFence unwraps a BOM-prefixed fenced body');
+  // Gate B mirror at small scale: computing skipLeading with the shared helper over a BOM-prefixed
+  // fenced JSONL head, then stream-profiling the body, sees zero parse failures — the >8 MB path no
+  // longer diverges from the ≤8 MB path on the BOM case.
+  const bomDir = mkdtempSync(path.join(tmpdir(), 'jslim-m11bom-'));
+  const bomFile = path.join(bomDir, 'bom.jsonl');
+  writeFileSync(bomFile, `﻿\`\`\`jsonl\n${Array.from({ length: 6 }, (_, i) => JSON.stringify({ id: i })).join('\n')}\n\`\`\`\n`);
+  const bomSkip = J.findOpeningFence(readFileSync(bomFile, 'utf8').split('\n', 4), 3) + 1; // Gate B: skipLeading = index + 1
+  const bomProf = await J.streamProfile(bomFile, {}, { skipLeading: bomSkip, fenceAware: true });
+  check('m11-bom-gateb-profiles-clean', bomSkip === 1 && bomProf.parseFailures === 0 && bomProf.rows === 6, `BOM+fence Gate B: skip=${bomSkip} failures=${bomProf.parseFailures} rows=${bomProf.rows}`);
+  rmSync(bomDir, { recursive: true, force: true });
+}
+
 console.log(`json-slim fixtures: ${pass} passed, ${fail} failed  (smart-crusher parity ${byteExact} byte + ${valueOnly} value of 17; log-compressor upstream parity ${logParityTotal}/20 = ${logByteExact} byte-exact + ${logDeviation1.length} deviation#1-trailer)`);
 if (fail) { console.log(failures.join('\n')); process.exit(1); }

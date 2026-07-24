@@ -20,8 +20,10 @@
  *   4. repetitive same-shape-array crush (a faithful port of Headroom's SmartCrusher).
  * The array-crush spills dropped rows to a file and leaves a `full=<path>` handle, so nothing
  * is lost — the detail is one `Read`/`jq` away.
- * Non-JSON input takes a sibling branch instead: JSONL rows re-enter the pipeline as one array,
- * log-shaped text goes to log-slim.cjs's signal selection, anything else passes through.
+ * Non-JSON input takes a sibling branch instead: a DOMINANT markdown fence (a tool's prose preamble
+ * + ```json…``` wrapping the real payload) is unwrapped and its body re-run through this same
+ * pipeline with the preamble kept on top; JSONL rows re-enter as one array; log-shaped text goes to
+ * log-slim.cjs's signal selection; anything else passes through.
  *
  * Pure Node built-ins only (repo policy): fs, os, path, crypto + the local adf and log-slim
  * siblings.
@@ -71,6 +73,10 @@ const DEFAULTS = {
   toon: false, // optional lossless tabular re-serialization of uniform arrays (behind a flag)
   jsonl: true, // detect a JSONL line stream (bulk-operation dump) → crush it as the same-shape array it is
   log: true, // M10: detect log/build-output TEXT → signal-select (errors/traces/summaries kept, spam deduped)
+  fence: true, // M11: unwrap a DOMINANT markdown fence (tool prose + ```json…```) and re-run the pipeline on its body
+  fenceDominance: 0.8, // M11: the fenced body must be ≥ this fraction of total bytes (else a doc with a small code block → untouched)
+  fencePreambleMax: 3, // M11: the opening fence must appear within this many leading lines (a short prose preamble)
+  fenceTrailerMax: 3, // M11: at most this many lines may follow the closing fence
   // --- CLI whale gates (M9b; CLI-only — the hook never reaches these sizes, the platform truncates first) ---
   cliOutCap: 49152, // Gate A: a slimmed body larger than 48 KB is spilled + summarized, not printed inline
   streamGateBytes: 8 * 1024 * 1024, // Gate B: a file larger than 8 MB is stream-PROFILED, never readFileSync'd
@@ -1071,6 +1077,49 @@ function parseJsonl(content) {
   return rows.length >= 2 ? rows : null;
 }
 
+// M11 — unwrap a DOMINANT markdown fence. A tool wraps its payload in prose + a code fence
+// ("Script ran on page and returned:\n```json\n<payload>\n```", chrome-devtools evaluate_script)
+// which the whole JSON pipeline can't parse. Detect: an OPTIONAL short prose preamble (the opening
+// fence must appear within cfg.fencePreambleMax leading lines), an opening ``` line (three-or-more
+// backticks, an optional language tag), a body, a closing bare ``` line, at most cfg.fenceTrailerMax
+// trailer lines. Return the body + preamble + trailer + offset (physical lines before the body, for the CLI's
+// line-scripting guidance) ONLY when the body is the dominant content (≥ cfg.fenceDominance of bytes)
+// — a real doc with a small code block stays below that bar → null → byte-identical passthrough. Non-
+// goals: first fence only (no nesting), no tilde fences (a ~~~ block simply doesn't match → null, no
+// crash), no preamble parsing.
+const FENCE_OPEN = /^ {0,3}`{3,}[ \t]*[A-Za-z0-9._+-]*[ \t\r]*$/; // opening: optional info string (```json); trailing \r tolerated so CRLF-delimited fences match
+const FENCE_CLOSE = /^ {0,3}`{3,}[ \t\r]*$/; // closing: bare backticks, no info string; trailing \r tolerated (CRLF)
+// Index of the opening code-fence line within the first `maxPreamble` lines (0-based), or -1. A leading
+// BOM is stripped from the first line so a BOM-prefixed fence (\uFEFF before ```json) is detected. Shared
+// by unwrapFence and the >8 MB Gate B scan so both agree on fence presence \u2014 the \u22648 MB and >8 MB paths
+// classify a BOM-prefixed fenced whale identically.
+function findOpeningFence(lines, maxPreamble) {
+  for (let i = 0; i < lines.length && i <= maxPreamble; i++) {
+    const ln = i === 0 ? String(lines[i]).replace(/^\uFEFF/, '') : lines[i];
+    if (FENCE_OPEN.test(ln)) return i;
+  }
+  return -1;
+}
+function unwrapFence(content, config) {
+  const cfg = { ...DEFAULTS, ...(config || {}) };
+  const lines = String(content).replace(/^\uFEFF/, '').split('\n');
+  const oi = findOpeningFence(lines, cfg.fencePreambleMax);
+  if (oi === -1) return null;
+  let ci = -1;
+  for (let j = oi + 1; j < lines.length; j++) { if (FENCE_CLOSE.test(lines[j])) { ci = j; break; } }
+  if (ci === -1) return null; // unterminated fence → old behavior
+  if (lines.length - 1 - ci > cfg.fenceTrailerMax) return null; // a long trailer → not a dominant single fence
+  const body = lines.slice(oi + 1, ci).join('\n');
+  const total = Buffer.byteLength(content, 'utf8');
+  if (!total || Buffer.byteLength(body, 'utf8') / total < cfg.fenceDominance) return null; // dominance guard
+  // Carry the trailer forward so a substantive line after the closing fence (e.g. "NOTE: truncated at
+  // N rows for safety.") is never silently dropped when the body compresses. A bare final newline from
+  // the split is not substantive → pop the trailing empty element(s) so it isn't mistaken for a trailer.
+  const trailerLines = lines.slice(ci + 1);
+  while (trailerLines.length && trailerLines[trailerLines.length - 1] === '') trailerLines.pop();
+  return { preamble: lines.slice(0, oi).join('\n'), body, trailer: trailerLines.join('\n'), offset: oi + 1 };
+}
+
 // slim a JSON *string* through the full pipeline →
 //   { output, wasModified, bytesIn, bytesOut, ratio, stages, reason?, format? }.
 // `stages` names the pipeline stages that actually changed the serialized bytes (adf / noise /
@@ -1085,6 +1134,28 @@ function slim(content, config) {
   let parsed;
   let fromJsonl = false;
   try { parsed = JSON.parse(content); } catch (_) {
+    // M11: a DOMINANT markdown fence (a tool's prose preamble + ```json…``` wrapping the payload,
+    // e.g. chrome-devtools evaluate_script) hides an otherwise-compressible body from the whole
+    // pipeline. Unwrap the body and re-run slim on it (fence:false → never re-unwrap), keeping the
+    // preamble on top so the result still reads as the tool's message. Only a WIN is emitted — an
+    // incompressible body leaves the WHOLE original untouched (never a bare unwrapped body). Runs
+    // BEFORE parseJsonl so a fenced JSONL body reaches the same jsonl branch as an unfenced one.
+    if (cfg.fence) {
+      const f = unwrapFence(content, cfg);
+      if (f) {
+        const inner = slim(f.body, { ...cfg, fence: false });
+        if (inner.wasModified && inner.bytesOut < inner.bytesIn) {
+          // Re-emit the tool's prose preamble on top and any trailer (e.g. "NOTE: truncated at N rows")
+          // below the slimmed body so neither is silently dropped. `preamble` + `fenceBody` (the PURE
+          // JSON body) ride on the result so the CLI's Gate-A spill can be valid JSON (see capOutput).
+          const output = [f.preamble, inner.output, f.trailer].filter((s) => s !== '').join('\n');
+          const bytesOut = Buffer.byteLength(output, 'utf8');
+          if (bytesOut < bytesIn) {
+            return { output, wasModified: true, bytesIn, bytesOut, ratio: bytesIn ? 1 - bytesOut / bytesIn : 0, stages: cfg.trace ? ['fence', ...inner.stages] : [], preamble: f.preamble, fenceBody: inner.output, fenceTrailer: f.trailer, ...(inner.logCompressed ? { logCompressed: true } : {}) };
+          }
+        }
+      }
+    }
     // A JSONL line stream (bulk-operation dump) is a same-shape array — route it through the
     // normal pipeline instead of the non-json handback (M9). parseJsonl returns null unless every
     // non-blank line is an object/array with ≥2 rows, so a truncated/prose file still falls to the
@@ -1172,13 +1243,19 @@ function capOutput(res, fileArg, config) {
   if (!fileArg || typeof res.output !== 'string' || res.bytesOut <= cfg.cliOutCap) return null;
   const dir = spillRoot(cfg.spillDir);
   try { fs.mkdirSync(dir, { recursive: true }); } catch (_) {}
+  // M11: a fenced result's output is "preamble\n<json>\ntrailer"; spill ONLY the pure JSON body so the
+  // fnd-slim-out-* spill is valid JSON — the advertised `--jq <spill>` recovery parses, and the shape
+  // sampler below sees a real row instead of choking on the prose preamble. The preamble/trailer prose
+  // rides on the handback text so the tool's message is preserved on top. A non-fenced result has no
+  // `fenceBody` → the spilled body IS res.output, byte-for-byte as before this fix.
+  const jsonBody = typeof res.fenceBody === 'string' ? res.fenceBody : res.output;
   const outPath = path.join(dir, `fnd-slim-out-${crypto.randomUUID()}.json`);
-  try { fs.writeFileSync(outPath, res.output); } catch (_) { return null; }
+  try { fs.writeFileSync(outPath, jsonBody); } catch (_) { return null; }
   // Shape sample: the first REAL row (skipping the crush sentinel) if the body is an array, else the
   // object itself. Truncated so one fat row can't blow the handback back past the very cap we enforce.
   let rowsKept = null, sample = null, isArr = false;
   try {
-    const parsed = JSON.parse(res.output);
+    const parsed = JSON.parse(jsonBody);
     if (Array.isArray(parsed)) {
       isArr = true;
       const real = parsed.filter((r) => !(r && typeof r === 'object' && !Array.isArray(r) && r._ccr_dropped));
@@ -1189,13 +1266,16 @@ function capOutput(res, fileArg, config) {
   let sampleStr = sample === null ? '(none)' : compact(sample);
   if (sampleStr.length > 200) sampleStr = `${sampleStr.slice(0, 200)}…`;
   const pct = ((res.ratio || 0) * 100).toFixed(1);
-  const handback =
+  const spilledBytes = Buffer.byteLength(jsonBody, 'utf8'); // the JSON body actually written to the spill
+  const pre = res.preamble ? res.preamble + '\n' : ''; // fenced tool prose, kept on top of the handback
+  const post = res.fenceTrailer ? '\n' + res.fenceTrailer : ''; // fenced trailer (e.g. a truncation note)
+  const handback = pre +
     `json-slim: slimmed output ${res.bytesOut} B exceeds the ${cfg.cliOutCap} B inline cap — spilled, not printed.\n` +
     `  ${res.bytesIn} → ${res.bytesOut} bytes (${pct}% reduction)${rowsKept != null ? `, ${rowsKept} rows kept` : ''}\n` +
     `  ${isArr ? 'first row' : 'shape'}: ${sampleStr}\n` +
-    `  slimmed output: ${outPath}\n` +
+    `  slimmed output: ${outPath} (${spilledBytes} B)\n` +
     `  original file:  ${fileArg}\n` +
-    `  narrow with: node json-slim.cjs --jq <path> ${outPath}`;
+    `  narrow with: node json-slim.cjs --jq <path> ${outPath}` + post;
   return { handback, spillOut: outPath };
 }
 
@@ -1318,14 +1398,39 @@ function profileLines(lines, meta, cfg) {
   return profileFinalize(st, meta || {});
 }
 
-// Single-pass readline over a read stream — O(samples) memory, so it works at GB scale.
-function streamProfile(file, cfg) {
+// Read up to `maxLines` lines from the HEAD of a file without loading it whole — a single bounded read
+// (≤ maxBytes). A >8 MB fenced whale can have a one-line 700 KB body, so we must NOT slurp the file to
+// find the fence; the opening fence is always among the first few short lines, well inside one 64 KB
+// read. String.split(sep, limit) caps the returned array, so a body line cut mid-read is never mistaken
+// for a complete fence line (it can't match the anchored fence regex). Used by Gate B (M11).
+function peekHeadLines(file, maxLines, maxBytes) {
+  try {
+    const fd = fs.openSync(file, 'r');
+    const buf = Buffer.alloc(maxBytes);
+    const read = fs.readSync(fd, buf, 0, maxBytes, 0);
+    fs.closeSync(fd);
+    return buf.toString('utf8', 0, read).split('\n', maxLines);
+  } catch (_) { return []; }
+}
+
+// Single-pass readline over a read stream — O(samples) memory, so it works at GB scale. `opts.skipLeading`
+// skips the first N physical lines and `opts.fenceAware` skips any closing-fence line, so a >8 MB fenced
+// JSONL whale profiles only its real rows (matching the ≤8 MB unwrap path) — the wrapper never inflates
+// parseFailures and the offset drives the guidance's tolerant loader / sed hint (M11).
+function streamProfile(file, cfg, opts) {
+  const skip = (opts && opts.skipLeading) || 0;
+  const fenceAware = !!(opts && opts.fenceAware);
   return new Promise((resolve, reject) => {
     let bytes = 0;
     try { bytes = fs.statSync(file).size; } catch (_) {}
     const st = makeProfileAccumulator(cfg);
     const rl = readline.createInterface({ input: fs.createReadStream(file, { encoding: 'utf8' }), crlfDelay: Infinity });
-    rl.on('line', (line) => profileFeed(st, line));
+    let idx = 0;
+    rl.on('line', (line) => {
+      if (idx++ < skip) return; // wrapper preamble + opening fence
+      if (fenceAware && FENCE_CLOSE.test(line)) return; // closing fence (and a would-be trailer fence)
+      profileFeed(st, line);
+    });
     rl.on('close', () => resolve(profileFinalize(st, { file, bytes })));
     rl.on('error', reject);
   });
@@ -1343,13 +1448,19 @@ function streamProfile(file, cfg) {
 // Wrap a path as a single POSIX shell token (single-quoted, embedded ' → '\'') so the copy-paste
 // recovery commands survive spaces, quotes, `$`, etc. in the path.
 function shq(s) { return `'${String(s).replace(/'/g, `'\\''`)}'`; }
-function whaleGuidance(file, rows) {
+function whaleGuidance(file, rows, offset) {
   const qf = shq(file);
   // The node -e script: JSON.stringify escapes the path for the inner JS string literal (handles " and
   // \); shq then single-quotes the WHOLE script for the shell (handles ' in the path). Both layers
   // needed — a bare "${file}" broke on a " in the path AND on a space splitting the shell token.
-  const script = `const rl=require("readline").createInterface({input:require("fs").createReadStream(${JSON.stringify(file)})});rl.on("line",l=>{const o=JSON.parse(l);/* filter, e.g. JSON.parse(o.children?.value||"[]").length>50 */&&console.log(o.handle)})`;
+  // M11: when the JSONL rows sit inside a fence (offset physical lines precede them), the loader must
+  // SKIP the wrapper lines (prose/fence/close) — a tolerant try/parse does that; the plain path keeps
+  // the strict `JSON.parse(l)` byte-for-byte, and a fence note states the offset for the sed hint.
+  const parse = offset ? 'let o;try{o=JSON.parse(l)}catch(_){return}' : 'const o=JSON.parse(l)';
+  const script = `const rl=require("readline").createInterface({input:require("fs").createReadStream(${JSON.stringify(file)})});rl.on("line",l=>{${parse};/* filter, e.g. JSON.parse(o.children?.value||"[]").length>50 */&&console.log(o.handle)})`;
+  const fenceNote = offset ? `  the rows are inside a \`\`\` fence — they begin at line ${offset + 1}; the loader below skips the ${offset} wrapper lines, and a sed line number is the row number + ${offset}.\n` : '';
   return `json-slim: query the ORIGINAL by line, don't pull it into context — ${file}${rows != null ? ` (${rows} rows)` : ''}.\n` +
+    fenceNote +
     `  filter rows (adapt the /* … */ predicate from the sample rows above):\n` +
     `    node -e ${shq(script)}\n` +
     `  single rows: sed -n '<N>p' ${qf}  ·  grep <pattern> ${qf}  (--jq would re-read the whole file)`;
@@ -1373,7 +1484,7 @@ function bigDocNotice(file, bytes) {
 // (passthrough-family + `profile:true`, reusing the existing `stream-profile` reason — no new value),
 // then the exit sweep. `bytes` is the original file size so the debug line's bytes_in matches the file
 // regardless of how the profile was fed.
-function emitProfile(profile, file, bytes, t0, cfg) {
+function emitProfile(profile, file, bytes, t0, cfg, offset) {
   // Gate B fires on SIZE alone, before any JSONL detection, so a >8 MB NON-JSONL document (a single
   // minified JSON array/object, a pretty-printed doc whose lines are fragments) reaches here too and
   // profiles as rows:0/1 with all-parseFailures — a row profile + row guidance is misleading for it.
@@ -1388,13 +1499,13 @@ function emitProfile(profile, file, bytes, t0, cfg) {
   }
   const body = compact(profile);
   process.stdout.write(body + '\n');
-  process.stdout.write(whaleGuidance(file, profile.rows) + '\n');
+  process.stdout.write(whaleGuidance(file, profile.rows, offset) + '\n');
   debugLog({ entry: 'cli', tool: file, decision: 'passthrough', reason: 'stream-profile', bytes_in: bytes, bytes_out: Buffer.byteLength(body, 'utf8'), pct: 0, stages: [], spill: null, spill_out: null, profile: true, ms: Date.now() - t0 }, cfg.spillDir);
   sweepSpills(cfg.spillDir);
 }
 
 module.exports = {
-  slim, crush, crushValue, parseJsonl,
+  slim, crush, crushValue, parseJsonl, unwrapFence, findOpeningFence,
   classifyArray, computeOptimalK, analyseDictArray, isErrorShape,
   adfStage, noiseStage, truncateStage, toonStage,
   sweepSpills, spillTtlHours, spillRoot,
@@ -1436,8 +1547,19 @@ if (require.main === module) {
         debugLog({ entry: 'cli', tool: fileArg, decision: 'passthrough', reason: 'stream-jq-refused', bytes_in: sz, bytes_out: 0, pct: 0, stages: [], spill: null, spill_out: null, ms: Date.now() - t0 }, cfg.spillDir);
         sweepSpills(cfg.spillDir);
       } else {
-        streamProfile(fileArg, cfg)
-          .then((profile) => emitProfile(profile, fileArg, sz, t0, cfg))
+        // M11: a >8 MB file may be a fenced JSONL whale (tool prose + ```jsonl…``` around the rows).
+        // Peek the head (bounded — never loads the file whole) for an opening fence in the first
+        // fencePreambleMax lines; if found, stream-profile the BODY only (skip the wrapper) and thread
+        // the line offset so the guidance's readline loader tolerates the wrapper lines and the sed hint
+        // states the offset — the SAME offset-correctness the ≤8 MB unwrap path already has.
+        let skipLeading = 0;
+        if (DEFAULTS.fence) {
+          const head = peekHeadLines(fileArg, DEFAULTS.fencePreambleMax + 1, 65536);
+          const oi = findOpeningFence(head, DEFAULTS.fencePreambleMax);
+          if (oi !== -1) skipLeading = oi + 1;
+        }
+        streamProfile(fileArg, cfg, { skipLeading, fenceAware: skipLeading > 0 })
+          .then((profile) => emitProfile(profile, fileArg, sz, t0, cfg, skipLeading))
           .catch((e) => { process.stderr.write('json-slim: profile failed: ' + e.message + '\n'); process.exit(1); });
       }
       return; // scheduled (async) or done (sync) — never fall through to the load-whole-file path
@@ -1459,10 +1581,19 @@ if (require.main === module) {
   // the WHOLE file, so it counts as "no narrowing" here and profiles too — otherwise the identity walk
   // leaves the whole reshaped array and slim() would crush + spill it (a JSONL body, contract-forbidden).
   if (fileArg && (!jq || jqIdentity)) {
-    const rows = parseJsonl(raw);
-    if (rows) {
-      const bytes = Buffer.byteLength(raw, 'utf8');
-      emitProfile(profileLines(raw.split('\n'), { file: fileArg, bytes }, cfg), fileArg, bytes, t0, cfg);
+    const bytes = Buffer.byteLength(raw, 'utf8');
+    let feed = null, offset = 0;
+    if (parseJsonl(raw)) { feed = raw.split('\n'); }
+    else if (DEFAULTS.fence) {
+      // M11: a JSONL body wrapped in a dominant fence still PROFILES (never crushed, like any JSONL
+      // file) — unwrap it and profile the body, threading the wrapper's line offset so the guidance's
+      // sed/readline hints point at the right physical lines. slim()'s fence branch would instead
+      // CRUSH it (correct for the hook), so the diversion must happen here, before slim() runs.
+      const f = unwrapFence(raw, cfg);
+      if (f && parseJsonl(f.body)) { feed = f.body.split('\n'); offset = f.offset; }
+    }
+    if (feed) {
+      emitProfile(profileLines(feed, { file: fileArg, bytes }, cfg), fileArg, bytes, t0, cfg, offset);
       return;
     }
   }
@@ -1474,7 +1605,16 @@ if (require.main === module) {
       // A JSONL file is a same-shape array — let `--jq 0.handle` address a row directly (M9).
       const rows = parseJsonl(raw);
       if (rows) v = rows;
-      else { process.stderr.write('json-slim: input is not valid JSON: ' + e.message + '\n'); process.exit(1); }
+      else {
+        // M11: a fenced JSON/JSONL payload (tool prose + ```json…```) — unwrap the dominant fence and
+        // narrow into its body so `--jq <path>` works on the ORIGINAL wrapper file too, not only the
+        // Gate-A spill. Without this, `--jq` on a fenced whale errored on the prose line.
+        const f = DEFAULTS.fence ? unwrapFence(raw, cfg) : null;
+        let fv;
+        if (f) { try { fv = JSON.parse(f.body); } catch (_) { const fr = parseJsonl(f.body); if (fr) fv = fr; } }
+        if (fv !== undefined) v = fv;
+        else { process.stderr.write('json-slim: input is not valid JSON: ' + e.message + '\n'); process.exit(1); }
+      }
     }
     for (const seg of jqSegs) {
       if (v == null) break;

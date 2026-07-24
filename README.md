@@ -389,7 +389,11 @@ hook error never blocks work:
   hands over the path; the session convention and the reader agents route that file through the
   same compressor on demand (`node scripts/json-slim.cjs <path>`, `--stats` to see the cut). If
   that file isn't JSON the CLI hands the path back instead of re-dumping it, so the caller reads
-  it directly. A **JSONL** file (one JSON object per line, e.g. a Shopify bulk-operation dump) is
+  it directly. A payload a tool **wrapped in a markdown fence** (prose preamble + ```` ```json ````
+  … ```` ``` ````, e.g. chrome-devtools `evaluate_script`) is unwrapped first when the fenced body
+  is the dominant content (≥ 80 % of bytes) and its body re-run through the pipeline with the
+  preamble kept on top; a real doc with a small code block stays below that bar and passes through
+  byte-identical. A **JSONL** file (one JSON object per line, e.g. a Shopify bulk-operation dump) is
   handled apart: the CLI never compresses it and never prints its rows — at ANY size it returns a
   **PROFILE** (row + parse-failure counts, per-key `{present, null, type, distinct}`, and head/tail/
   reservoir sample rows) plus guidance to query the ORIGINAL file by line — a `readline` filter (the
