@@ -454,6 +454,36 @@ run_dbg "$DBG" "$in" >/dev/null
 assert_eq M26-decision "$(jq -r '.decision' "$DBG/$DBGLOG" 2>/dev/null)" "compressed"
 if jq -e '.stages | index("jsonl")' "$DBG/$DBGLOG" >/dev/null 2>&1; then ok; else bad M26-jsonl-stage "stages=$(jq -c '.stages' "$DBG/$DBGLOG" 2>/dev/null)"; fi
 
+# ── M27–M28: log/build-output text (M10) ──────────────────────────────────────
+# A tool result whose text is log-shaped (console WARN spam + errors + a JS stack trace) is
+# signal-selected, not JSON — the hook must compress it like any other lossy stage (updatedToolOutput
+# + a full= recovery spill) and, with DEBUG on, record the `log` stage. Generated in-test.
+LGB="$(node -e '
+  const l=[];
+  for(let i=0;i<300;i++) l.push("[WARN] frame budget exceeded: draw call skipped for layer=overlay");
+  l.push("[ERROR] renderer: device removed reason=hung");
+  l.push("TypeError: Cannot read properties of undefined (reading \"gl\")");
+  l.push("    at Renderer.draw (/app/src/render.js:42:15)");
+  process.stdout.write(l.join("\n"));
+')"
+in="$(jq -n --arg t "$LGB" '{tool_name:"mcp__pw__console",tool_response:{content:[{type:"text",text:$t}]}}')"
+
+# M27: a >4 KB log text block → updatedToolOutput carrying a full= spill that exists on disk, with the
+# looping warning deduped ×N and the ERROR/stack-head kept.
+out="$(run_slim "$in")"
+assert_contains M27-updated "$out" "updatedToolOutput"
+text="$(printf '%s' "$out" | jq -r '.hookSpecificOutput.updatedToolOutput.content[0].text' 2>/dev/null)"
+p="$(printf '%s' "$text" | grep -o 'full=[^ >]*' | head -1 | sed 's/^full=//')"
+if [ -n "$p" ] && [ -f "$p" ]; then ok; else bad M27-fullfile "no existing full= file (p='$p')"; fi
+assert_contains M27-xN "$text" "×300"
+assert_contains M27-error-kept "$text" "[ERROR] renderer"
+
+# M28: DEBUG on → the emitted line is `compressed` and its stages include `log`
+DBG="$TMP/dbg-m28"; mkdir -p "$DBG"
+run_dbg "$DBG" "$in" >/dev/null
+assert_eq M28-decision "$(jq -r '.decision' "$DBG/$DBGLOG" 2>/dev/null)" "compressed"
+if jq -e '.stages | index("log")' "$DBG/$DBGLOG" >/dev/null 2>&1; then ok; else bad M28-log-stage "stages=$(jq -c '.stages' "$DBG/$DBGLOG" 2>/dev/null)"; fi
+
 # ═══ P — UserPromptSubmit prompt-json-guard ═════════════════════════════════
 # Gate (FND_PROMPT_JSON) via the extracted plugin.json command[1]; behavior by piping
 # UserPromptSubmit-shaped input to the hook. $shim/$fake come from the G/M scaffolding.

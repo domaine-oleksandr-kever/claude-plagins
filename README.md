@@ -397,8 +397,12 @@ hook error never blocks work:
   JSONL: a sampled subset can't answer analytical questions whose answers live in rows the sample skips.
   Files ≤ 8 MB profile the parsed rows; larger ones stream via `readline` (never loaded whole) — the
   same PROFILE either way. `--jq <path>` extracts a single value from a ≤ 8 MB JSONL; on a larger one it
-  is refused (it would re-read the whole file). A **non-JSONL** JSON document keeps the normal slim
-  behavior, plus a guard: if its slimmed body still exceeds ~48 KB it is spilled to a `fnd-slim-out-*`
+  is refused (it would re-read the whole file). **Log-shaped text** (build/test output, console spam,
+  stack traces) is compressed by signal selection instead — errors, stack-trace heads, and summary
+  lines are kept while repeated INFO/WARN spam is deduped `×N` and everything else is dropped to a
+  `[N lines omitted: …]` trailer (on a file the CLI names the on-disk original for recovery); prose,
+  markdown, and XML fall below the log detector's threshold and pass through unchanged. A **non-JSONL**
+  JSON document keeps the normal slim behavior, plus a guard: if its slimmed body still exceeds ~48 KB it is spilled to a `fnd-slim-out-*`
   file and handed back as a one-line summary + the first element + both paths (`--jq <path>` to narrow),
   never dumped inline. **Why wasn't a result compressed?**
   set `FND_MCP_SLIM_DEBUG=1`, re-run, and read `<FND_MCP_SLIM_DIR>/fnd-mcp-slim-debug.log` — one

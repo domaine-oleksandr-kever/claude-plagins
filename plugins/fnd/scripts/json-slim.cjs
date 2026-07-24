@@ -8,7 +8,9 @@
  *       node json-slim.cjs <file.json> [--jq <path>] [--toon] [--no-spill] [--stats]
  *       cat big.json | node json-slim.cjs
  *     A JSONL file is PROFILED, never compressed (stats + sample rows + line-scripting
- *     guidance, streamed above 8 MB); non-JSONL CLI output is capped at 48 KB (spill + handback).
+ *     guidance, streamed above 8 MB); log-shaped text is signal-compressed (log-slim.cjs) with
+ *     an `original: <path>` recovery line; other non-JSONL JSON output is capped at 48 KB
+ *     (spill + handback).
  *
  * The pipeline is shape-driven (each stage independent, all generic — no per-tool registry),
  * applied by slim() in this order:
@@ -18,8 +20,11 @@
  *   4. repetitive same-shape-array crush (a faithful port of Headroom's SmartCrusher).
  * The array-crush spills dropped rows to a file and leaves a `full=<path>` handle, so nothing
  * is lost — the detail is one `Read`/`jq` away.
+ * Non-JSON input takes a sibling branch instead: JSONL rows re-enter the pipeline as one array,
+ * log-shaped text goes to log-slim.cjs's signal selection, anything else passes through.
  *
- * Pure Node built-ins only (repo policy): fs, os, path, crypto + the local adf converter.
+ * Pure Node built-ins only (repo policy): fs, os, path, crypto + the local adf and log-slim
+ * siblings.
  *
  * -----------------------------------------------------------------------------------------------
  * The array-crush (§ crushValue / analyseDictArray / sampleNumberArray / sampleStringArray) is a
@@ -38,6 +43,7 @@ const path = require('path');
 const crypto = require('crypto');
 const readline = require('readline'); // Gate B streams a whale file line-by-line — a Node built-in
 const { adfToMarkdown } = require('./adf-to-md.cjs');
+const { detectLog, compressLog } = require('./log-slim.cjs'); // M10: log/build-output text compressor
 
 // ---------------------------------------------------------------------------- config --
 
@@ -64,6 +70,7 @@ const DEFAULTS = {
   stringLimit: 200, // stage 4 threshold (chars)
   toon: false, // optional lossless tabular re-serialization of uniform arrays (behind a flag)
   jsonl: true, // detect a JSONL line stream (bulk-operation dump) → crush it as the same-shape array it is
+  log: true, // M10: detect log/build-output TEXT → signal-select (errors/traces/summaries kept, spam deduped)
   // --- CLI whale gates (M9b; CLI-only — the hook never reaches these sizes, the platform truncates first) ---
   cliOutCap: 49152, // Gate A: a slimmed body larger than 48 KB is spilled + summarized, not printed inline
   streamGateBytes: 8 * 1024 * 1024, // Gate B: a file larger than 8 MB is stream-PROFILED, never readFileSync'd
@@ -1085,6 +1092,19 @@ function slim(content, config) {
     const rows = cfg.jsonl ? parseJsonl(content) : null;
     if (rows) { parsed = rows; fromJsonl = true; }
     else {
+      // M10: log-shaped TEXT (build/test output, console spam) is signal-selected, not sampled —
+      // errors/traces/summaries kept, INFO/WARN spam deduped ×N. Order: parseJsonl (above) →
+      // log-detect (here) → passthrough. The detector must clear conf ≥ 0.5, so prose / markdown /
+      // docs-chunks / XML fall through byte-identical; a short or already-minimal log yields no byte
+      // gain and also falls through. Trace-only 'log' stage tag. Recovery: the hook spills the whole
+      // original; the CLI names the on-disk file (both lossless nets, so no CCR marker here).
+      if (cfg.log && detectLog(content).isLog) {
+        const r = compressLog(content, cfg);
+        const bytesOut = Buffer.byteLength(r.compressed, 'utf8');
+        if (r.compressed !== content && bytesOut < bytesIn) {
+          return { output: r.compressed, wasModified: true, bytesIn, bytesOut, ratio: bytesIn ? 1 - bytesOut / bytesIn : 0, stages: cfg.trace ? ['log'] : [], logCompressed: true };
+        }
+      }
       // `format` sniffs the head so the debug log can tell WHAT the non-JSON payload was (M8) — a
       // pure diagnostic tag; it never changes the passthrough. Set on this branch only.
       return { output: content, wasModified: false, bytesIn, bytesOut: bytesIn, ratio: 0, reason: 'non-json', format: sniffFormat(content), stages: [] };
@@ -1380,6 +1400,7 @@ module.exports = {
   sweepSpills, spillTtlHours, spillRoot,
   debugLog, debugEnabled,
   capOutput, streamProfile, profileLines,
+  detectLog, compressLog, // M10: re-exported from log-slim.cjs for callers/tests
   DEFAULTS,
 };
 
@@ -1469,11 +1490,17 @@ if (require.main === module) {
   // declined it above, so it was not profiled). A non-JSON STDIN stream has no path to return, so it
   // still passes through below.
   const handback = fileArg && res.reason === 'non-json';
+  // M10 — a compressed LOG file: print the selected body (its own `[N lines omitted…]` trailer
+  // included) + one line naming the on-disk original, which IS the recovery (profile-philosophy
+  // consistent). Skips capOutput below — that gate is JSON-document-shaped, not log text.
+  const logOut = res.logCompressed && fileArg;
   // Gate A (M9b) — a slimmed body over the inline cap is spilled + summarized, not dumped: one huge JSON
   // document (JSONL files never reach here — they profiled upstream).
-  const capped = handback ? null : capOutput(res, fileArg, cfg);
+  const capped = (handback || logOut) ? null : capOutput(res, fileArg, cfg);
   if (handback) {
     process.stdout.write(`json-slim: nothing to compress; read the file directly: ${fileArg}\n`);
+  } else if (logOut) {
+    process.stdout.write(`${res.output}\noriginal: ${fileArg}\n`);
   } else if (capped) {
     process.stdout.write(capped.handback + '\n');
   } else {

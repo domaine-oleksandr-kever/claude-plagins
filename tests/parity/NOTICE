@@ -23,6 +23,61 @@ pins byte-parity (16/17) or, where JavaScript number semantics prevent it, value
 (1/17 — the time_series fixture, whose float-valued whole numbers `0.0` re-serialize to
 `0`).
 
+log-slim.cjs — log-compressor port attribution
+==============================================
+
+plugins/fnd/scripts/log-slim.cjs contains a JavaScript re-implementation of Headroom's
+LogCompressor and the log branch of its regex ContentDetector.
+
+  Headroom
+  Copyright 2025 Headroom Contributors
+  https://github.com/headroomlabs-ai/headroom
+  Licensed under the Apache License, Version 2.0.
+
+The port is a MODIFIED derivative: it is written from scratch in Node.js (Headroom's live
+implementation is Rust), ported from the Python shim
+(headroom/transforms/log_compressor.py — whose scoring/parse regexes and constants the
+port follows closely) with the two Rust-only passes (flavor-aware stack-trace termination and
+runtime-frame collapse) taken from crates/headroom-core/src/transforms/log_compressor.rs,
+and it diverges deliberately from upstream: it does NOT emit Headroom's CCR/MD5 spill marker
+at runtime (json-slim and the mcp-slim hook spill the whole original as the recovery net; the
+marker is reproduced only under `ccrStore:true`), it annotates deduped warnings with ` ×N`
+(upstream drops duplicates silently), its omitted-lines trailer reports per-level counts of
+lines ACTUALLY omitted rather than the log's total level composition, and the log-branch
+CONTENT DETECTOR gates on structural log-level FIELDS (uppercase/first, bracketed, or `:`/`[`
+delimited) instead of a case-insensitive keyword-anywhere scan, so prose/markdown/docs that
+merely mention error words pass through untouched. The Drain-style LogTemplate reformat, the
+magika ML detector, and aho-corasick are explicitly NOT ported (a plain substring / regex
+scan is sufficient at our sizes).
+
+The 20 fixtures under tests/parity/fixtures/log_compressor/ are copied verbatim from the Headroom
+repository (tests/parity/fixtures/log_compressor/, same Apache-2.0 license) — genuine recordings of
+Headroom's own LogCompressor, exactly as tests/parity/fixtures/smart_crusher/ are for SmartCrusher.
+They are the porting CONTRACT: tests/json-slim-fixtures.mjs runs the port against them and pins it
+BYTE-EXACT to upstream's recorded output — 19/20 fully identical (body, format_detected, cache_key,
+compressed_line_count, stats, compression_ratio), and 1/20 (the sole 305-line compressing fixture)
+byte-identical on every line EXCEPT the omitted-lines trailer, which is exempted for exactly one
+enumerated deviation and asserted against our own semantics. Each fixture's integrity is checked by
+recomputing the recorder's canonical digest: upstream's field is named `input_sha256` but stores
+sha256 of the canonical payload `{transform, input, config, fn}` (recorder.py `_canonical_digest`,
+the filename being its first 16 hex chars), NOT sha256 of the input string — so the harness pins that
+canonical digest against both the stored field and the filename to detect any tampering.
+
+The three enumerated deviations, and where each is asserted:
+  1. Omitted-lines trailer. Upstream reports per-level TOTALS (`[297 lines omitted: 1 ERROR, 300
+     INFO]`, listing a KEPT error and a breakdown that exceeds the omitted count); the port reports
+     lines ACTUALLY omitted (`[297 lines omitted: 297 INFO]`) — the honesty fix from adversarial
+     review. This is the ONLY line exempted on the one compressing fixture; the test re-derives our
+     trailer from upstream's own body+stats and pins it, byte-compares every other line, and
+     recomputes compression_ratio for our (shorter) output.
+  2. Warning-dedupe ` ×N` annotation. Upstream drops duplicate warnings silently; the port annotates
+     the survivor ` ×N`. No upstream fixture reaches this path (the compressing fixture has zero
+     warnings), so it is covered by the dedupe unit tests, not the fixtures.
+  3. Runtime CCR-marker omission. Upstream always emits the `[N lines compressed to M. Retrieve more:
+     hash=…]` MD5 marker; the port emits it only under `ccrStore:true` (json-slim/mcp-slim spill the
+     whole original as the recovery net at runtime). The fixtures run with `ccrStore:true`, so the
+     marker is reproduced and pinned byte-for-byte; the runtime omits it.
+
 A full copy of the Apache License, Version 2.0 is available at
 https://www.apache.org/licenses/LICENSE-2.0 . This project as a whole is MIT-licensed
 (see repo LICENSE); this NOTICE records the third-party attribution for the ported code

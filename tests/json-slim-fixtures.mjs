@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { readFileSync, readdirSync, rmSync, mkdtempSync, writeFileSync, utimesSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -555,5 +556,263 @@ check('m9-broken-json-preserved', (() => { const r = J.slim('{"id":1,\n"untermin
   rmSync(dir, { recursive: true, force: true });
 }
 
-console.log(`json-slim fixtures: ${pass} passed, ${fail} failed  (parity ${byteExact} byte-exact + ${valueOnly} value-parity of 17)`);
+// ================================================================ M10 — log compressor ==
+const L = require(path.join(ROOT, 'plugins/fnd/scripts/log-slim.cjs'));
+const LOG_PARITY = path.join(ROOT, 'tests/parity/fixtures/log_compressor');
+
+// --- UPSTREAM parity fixtures for the log compressor ---
+// These 20 fixtures are VERBATIM recordings from the Headroom repository
+// (tests/parity/fixtures/log_compressor/, Apache-2.0 — see tests/parity/NOTICE), the same
+// third-party oracle the smart_crusher fixtures come from. This block pins our port BYTE-EXACT
+// against upstream's recorded `compressed`/meta, EXCEPT where one of the three enumerated,
+// intentional deviations of the port applies — and every relaxation is pinpointed to exactly one
+// named deviation (no blanket fuzzy matching).
+//
+// Two things are asserted per fixture:
+//   (1) INTEGRITY. Upstream's field is named `input_sha256` but the recorder actually stores the
+//       sha256 of the CANONICAL fixture payload `{transform, input, config, fn}` (recorder.py
+//       `_canonical_digest`), and the filename is its first 16 hex chars — it is NOT the sha256 of
+//       the input STRING (none of the 20 are). We recompute that canonical digest here (Python
+//       json.dumps semantics: sorted keys, `, `/`: ` separators, ensure_ascii — all inputs are
+//       ASCII) and assert it equals both the stored field and the filename, which detects any
+//       tampering of the recorded input or config.
+//   (2) PARITY. compressLog(input, {…fixture config, ccrStore:true}) reproduces upstream's
+//       `compressed` byte-for-byte, plus format_detected / cache_key / compressed_line_count /
+//       stats / compression_ratio — except the omitted-lines TRAILER on the one compressing
+//       fixture, which upstream reports with per-level TOTALS (`1 ERROR, 300 INFO`, listing a KEPT
+//       error) while our port reports lines ACTUALLY dropped (`297 INFO`) — DEVIATION #1, the
+//       honesty fix. There, ONLY the single `[N lines omitted: …]` line is exempt from the
+//       byte-compare: every other line (including the CCR marker) must still match upstream
+//       byte-for-byte, our trailer is re-derived independently from upstream's own body+stats and
+//       asserted, and compression_ratio is recomputed for our (shorter-trailer) output.
+// Deviation #3 (the CCR `[N lines compressed to M. Retrieve more: hash=…]` marker) IS exercised
+// here under `ccrStore:true` and matches upstream byte-for-byte; the runtime omits it. Deviation #2
+// (warning-dedupe ` ×N` annotation) is not reached by any upstream fixture (the one compressing
+// case has zero warnings) and is covered by the dedupe unit tests below instead.
+const LOG_CFG_MAP = {
+  dedupe_warnings: 'dedupeWarnings', enable_ccr: 'enableCcr', error_context_lines: 'errorContextLines',
+  keep_first_error: 'keepFirstError', keep_last_error: 'keepLastError', keep_summary_lines: 'keepSummaryLines',
+  max_errors: 'maxErrors', max_stack_traces: 'maxStackTraces', max_total_lines: 'maxTotalLines',
+  max_warnings: 'maxWarnings', min_lines_for_ccr: 'minLinesForCcr', stack_trace_max_lines: 'stackTraceMaxLines',
+};
+// Upstream recorder identity for the log compressor (recorder.py wraps LogCompressor.compress).
+const LOG_FIXTURE_FN = 'headroom.transforms.log_compressor.LogCompressor.compress';
+// Reproduce Python `json.dumps(obj, sort_keys=True)` for the ASCII scalar/dict payloads the recorder
+// digests (bool→true/false, int verbatim, string via JS JSON.stringify which matches ensure_ascii for
+// ASCII, `, `/`: ` separators). Used only to recompute upstream's canonical fixture digest.
+const pyJson = (v) => {
+  if (v === null) return 'null';
+  if (typeof v === 'boolean') return v ? 'true' : 'false';
+  if (typeof v === 'number') return String(v);
+  if (typeof v === 'string') return JSON.stringify(v);
+  if (Array.isArray(v)) return '[' + v.map(pyJson).join(', ') + ']';
+  return '{' + Object.keys(v).sort().map((k) => JSON.stringify(k) + ': ' + pyJson(v[k])).join(', ') + '}';
+};
+const OMIT_TRAILER_RE = /^\[\d+ lines omitted: .*\]$/;
+// Independently re-derive our-semantics omitted trailer from UPSTREAM's own body lines + stats totals:
+// for each level, dropped = total(level) − kept(level), where kept is classified off the upstream body
+// with the port's own leaf classifier. This is deviation #1's rule applied to upstream data — it must
+// equal the trailer our port actually emitted.
+const deriveOurTrailer = (bodyLines, stats, omitted) => {
+  const parts = [];
+  for (const [label, level, total] of [['ERROR', 'error', stats.errors], ['FAIL', 'fail', stats.fails], ['WARN', 'warn', stats.warnings], ['INFO', 'info', stats.info]]) {
+    const kept = bodyLines.reduce((n, ln) => n + (L.classifyLevel(ln) === level ? 1 : 0), 0);
+    const dropped = (total || 0) - kept;
+    if (dropped > 0) parts.push(`${dropped} ${label}`);
+  }
+  return `[${omitted} lines omitted: ${parts.join(', ')}]`;
+};
+let logByteExact = 0; // fully byte+meta identical to upstream (no deviation reached)
+let logDeviation1 = []; // fixtures whose trailer hits deviation #1 (byte-exact everywhere else)
+let logCcrMarker = []; // fixtures that reproduce the deviation-#3 CCR marker under ccrStore:true
+for (const f of readdirSync(LOG_PARITY).filter((x) => x.endsWith('.json')).sort()) {
+  const id = f.replace(/\.json$/, '');
+  const fx = JSON.parse(readFileSync(path.join(LOG_PARITY, f), 'utf8'));
+  // (1) integrity: recompute upstream's canonical fixture digest; it pins field + filename.
+  const digest = createHash('sha256').update(pyJson({ transform: fx.transform || 'log_compressor', input: fx.input, config: fx.config || {}, fn: LOG_FIXTURE_FN }), 'utf8').digest('hex');
+  check(`log-parity-digest:${id}`, digest === fx.input_sha256 && digest.slice(0, 16) === id,
+    `canonical fixture digest mismatch (tampered input/config?)\n  stored: ${fx.input_sha256}\n  file:   ${id}\n  actual: ${digest}`);
+  // (2) parity
+  const cfg = { ccrStore: true };
+  for (const [k, v] of Object.entries(fx.config || {})) if (LOG_CFG_MAP[k]) cfg[LOG_CFG_MAP[k]] = v;
+  const got = L.compressLog(fx.input, cfg);
+  const exp = fx.output;
+  // meta that is INVARIANT under the trailer deviation (stats totals, selected line count, format, and
+  // the MD5-of-original cache_key are all unaffected by the trailer text) — always pinned to upstream.
+  const okMeta = got.format_detected === exp.format_detected && (got.cache_key || null) === (exp.cache_key || null) &&
+    got.compressed_line_count === exp.compressed_line_count && JSON.stringify(got.stats) === JSON.stringify(exp.stats);
+  if (got.cache_key) logCcrMarker.push(id); // ccrStore:true emitted the deviation-#3 marker
+  if (got.compressed === exp.compressed) {
+    // No deviation reached → full byte-exact parity, ratio included.
+    const okRatio = Math.abs(got.compression_ratio - exp.compression_ratio) < 1e-9;
+    if (okMeta && okRatio) logByteExact++;
+    check(`log-parity:${id}`, okMeta && okRatio,
+      `byte-exact body but meta/ratio MISMATCH\n  ratio got ${got.compression_ratio} exp ${exp.compression_ratio}`);
+    continue;
+  }
+  // Bodies differ → the ONLY permitted cause is deviation #1 (the omitted trailer). Everything else
+  // must be byte-identical; anything else here is a REAL port bug.
+  const g = got.compressed.split('\n');
+  const e = exp.compressed.split('\n');
+  const ti = e.findIndex((ln) => OMIT_TRAILER_RE.test(ln));
+  const sameLen = g.length === e.length;
+  const onlyTrailerDiffers = sameLen && ti >= 0 && g.every((ln, i) => i === ti || ln === e[i]);
+  const expTrailerTotals = ti >= 0 && exp.compressed && (() => { // upstream trailer uses TOTALS (lists a kept error / exceeds omitted)
+    const m = e[ti].match(/^\[(\d+) lines omitted: (.*)\]$/);
+    if (!m) return false;
+    const sum = m[2].split(', ').reduce((a, p) => a + Number(p.split(' ')[0]), 0);
+    return sum > Number(m[1]); // 1 ERROR + 300 INFO = 301 > 297 omitted → totals-semantics
+  })();
+  const bodyLines = g.slice(0, exp.compressed_line_count); // our selected body (pre-trailer/marker)
+  const wantTrailer = deriveOurTrailer(bodyLines, exp.stats, Number((e[ti].match(/^\[(\d+)/) || [])[1]));
+  const gotTrailerOk = ti >= 0 && g[ti] === wantTrailer;
+  // ratio is recomputed for OUR output: our trailer is shorter (drops the kept-level term), so our
+  // compressed byte length — and thus our ratio — is legitimately smaller than upstream's. The port
+  // measures ratio on the body+trailer BEFORE the CCR marker is appended, so strip the trailing marker.
+  const ourBody = got.cache_key ? got.compressed.slice(0, got.compressed.lastIndexOf('\n[')) : got.compressed;
+  const ratioRecomputed = Buffer.byteLength(ourBody, 'utf8') / Math.max(1, Buffer.byteLength(fx.input, 'utf8'));
+  const okRatioSelf = Math.abs(got.compression_ratio - ratioRecomputed) < 1e-9 && got.compression_ratio < exp.compression_ratio;
+  const pass = okMeta && onlyTrailerDiffers && expTrailerTotals && gotTrailerOk && okRatioSelf;
+  if (pass) logDeviation1.push(id);
+  check(`log-parity:${id} [deviation#1 trailer]`, pass,
+    `\n  onlyTrailerDiffers=${onlyTrailerDiffers} expTotals=${expTrailerTotals} gotTrailerOk=${gotTrailerOk} okMeta=${okMeta} okRatioSelf=${okRatioSelf}` +
+    `\n  got trailer: ${JSON.stringify(g[ti])}\n  exp trailer: ${JSON.stringify(e[ti])}\n  want (ours):  ${JSON.stringify(wantTrailer)}`);
+}
+// 19 fixtures are fully byte+meta identical to upstream; exactly 1 (the sole compressing case) hits the
+// deviation-#1 trailer and is byte-identical everywhere else. That 1 also reproduces the deviation-#3
+// CCR marker under ccrStore:true.
+check('log-parity:byte-exact-count', logByteExact === 19, `fully byte-exact ${logByteExact}/20 (expected 19; 1 is deviation-#1 trailer parity)`);
+check('log-parity:deviation1-count', logDeviation1.length === 1, `deviation-#1 fixtures ${JSON.stringify(logDeviation1)} (expected exactly 1)`);
+check('log-parity:ccr-marker-covered', logCcrMarker.length >= 1, `no fixture exercises the deviation-#3 CCR marker under ccrStore:true (got ${JSON.stringify(logCcrMarker)})`);
+const logParityTotal = logByteExact + logDeviation1.length;
+
+// --- detector truth table ---
+const mkLog = (line, n) => Array.from({ length: n }, () => line).join('\n');
+check('log-detect-pytest', J.detectLog(['=== FAILURES ===', 'FAILED tests/test_a.py::test_x', '    assert 1 == 2', '=== ERRORS ===', 'ERROR tests/test_b.py', '1 failed, 2 passed'].join('\n')).isLog, 'pytest output → log');
+check('log-detect-npm', J.detectLog(mkLog('npm ERR! code ELIFECYCLE', 10)).isLog, 'npm output → log');
+check('log-detect-console-spam', J.detectLog(mkLog('[WARNING] slow frame skipped', 20)).isLog, 'console WARN spam → log');
+check('log-detect-markdown-not', !J.detectLog(['## Heading', '', 'A paragraph of ordinary documentation prose describing an API.', 'Another sentence with a `code` span and a [link](http://x).', '', '- bullet one', '- bullet two', '', 'Closing remarks with no build keywords at all.'].join('\n')).isLog, 'markdown docs → NOT log');
+check('log-detect-docs-chunk-not', !J.detectLog(['## Fetching products', '', 'Use the products connection to page through a catalogue. Each edge exposes a cursor.', '```graphql', 'query { products(first: 10) { edges { node { id } } } }', '```', 'Pagination is cursor-based; keep requesting until hasNextPage is false.'].join('\n')).isLog, 'shopify docs-chunk → NOT log');
+check('log-detect-prose-not', !J.detectLog('The quick brown fox jumps over the lazy dog. '.repeat(30)).isLog, 'prose → NOT log');
+check('log-detect-xml-not', !J.detectLog('<frame id="1">' + '<node x="1"/>'.repeat(50) + '</frame>').isLog, 'figma XML → NOT log');
+// ratio boundary: 3 rule-lines in 10 (ratio 0.3, no error hits) → conf 0.45 < 0.5; 4 in 10 → conf 0.5
+{
+  const belowLines = ['===', '===', '==='].concat(Array.from({ length: 7 }, (_, i) => `plain text ${i}`));
+  const aboveLines = ['===', '===', '===', '==='].concat(Array.from({ length: 6 }, (_, i) => `plain text ${i}`));
+  check('log-detect-conf-below', !J.detectLog(belowLines.join('\n')).isLog, `conf ${J.detectLog(belowLines.join('\n')).confidence.toFixed(3)} must be < 0.5`);
+  check('log-detect-conf-above', J.detectLog(aboveLines.join('\n')).isLog, `conf ${J.detectLog(aboveLines.join('\n')).confidence.toFixed(3)} must be ≥ 0.5`);
+  // ratio gate: 1 match in 20 lines → ratio 0.05 < 0.1 → not a log regardless of the base 0.3
+  check('log-detect-ratio-gate', !J.detectLog(['ERROR boom'].concat(Array.from({ length: 19 }, (_, i) => `text ${i}`)).join('\n')).isLog, 'ratio < 0.1 → NOT log');
+}
+
+// --- scoring units ---
+eq('log-score-error', L.scoreLogLine({ level: 'error', isStackTrace: false, isSummary: false }), 1.0);
+eq('log-score-warn', L.scoreLogLine({ level: 'warn', isStackTrace: false, isSummary: false }), 0.5);
+eq('log-score-info', L.scoreLogLine({ level: 'info', isStackTrace: false, isSummary: false }), 0.1);
+eq('log-score-trace', L.scoreLogLine({ level: 'trace', isStackTrace: false, isSummary: false }), 0.02);
+eq('log-score-caps-at-one', L.scoreLogLine({ level: 'error', isStackTrace: true, isSummary: true }), 1.0); // 1.0+0.3+0.4 → capped
+eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: true, isSummary: false }), 0.4); // 0.1+0.3
+
+// --- dedupe units (conservative + ×N annotation) ---
+{
+  const distinct = L.dedupeSimilar([{ lineNumber: 0, content: 'segfault at 0xdeadbeef in thread main', level: 'warn' }, { lineNumber: 1, content: 'heap overflow at 0xcafef00d in thread worker', level: 'warn' }]);
+  check('log-dedupe-preserves-distinct', distinct.length === 2, `distinct message prefixes stay separate, got ${distinct.length}`);
+  const repeated = L.dedupeSimilar([{ lineNumber: 0, content: 'warning: file /tmp/a/123 issue', level: 'warn' }, { lineNumber: 1, content: 'warning: file /tmp/b/999 issue', level: 'warn' }]);
+  check('log-dedupe-collapses-repeated', repeated.length === 1, `same normalized suffix collapses, got ${repeated.length}`);
+  check('log-dedupe-annotates-xN', repeated[0].content.endsWith(' ×2'), `survivor annotated ×N, got ${JSON.stringify(repeated[0].content)}`);
+  eq('log-normalize-suffix-only', L.normalizeForDedupe('ECONNREFUSED: connect to 10.0.0.1:5432 failed'), 'ECONNREFUSED: connect to N.N.N.N:N failed');
+}
+
+// --- frame-collapse unit (Rust-only pass): an oversized Java chained trace ---
+{
+  const lines = ['Exception in thread "main" java.lang.IllegalStateException: boom', 'at com.example.App.handle(App.java:10)', 'at com.example.App.dispatch(App.java:20)'];
+  for (let i = 0; i < 30; i++) lines.push(`at java.base/java.util.stream.Op${i}.eval(Op${i}.java:${i + 1})`);
+  lines.push('Caused by: java.io.IOException: disk gone');
+  lines.push('at com.example.Disk.read(Disk.java:77)');
+  for (let i = 0; i < 30; i++) lines.push(`at java.base/java.lang.Thread${i}.run(Thread.java:${i + 1})`);
+  lines.push('... 17 more');
+  const parsed = L.parseLogLines(lines, {});
+  const stack = parsed.filter((l) => l.isStackTrace);
+  const collapsed = L.collapseTraceFrames(stack, 3, 5);
+  const kept = collapsed.kept.map((l) => l.content).join('\n');
+  check('log-collapse-marker', /\[\.\.\. \d+ frames collapsed\]/.test(kept), 'a collapse marker is emitted');
+  check('log-collapse-keeps-chain-head', kept.includes('Caused by: java.io.IOException'), 'chain head survives');
+  check('log-collapse-keeps-app-frame', kept.includes('com.example.Disk.read'), 'app frame survives');
+  check('log-collapse-keeps-more-summary', kept.includes('... 17 more'), 'elided-frames summary survives');
+  check('log-collapse-drops-deep-runtime', !kept.includes('Thread25.run'), 'deep runtime tail collapsed away');
+  check('log-collapse-dropped-indices', collapsed.droppedIndices.length > 0, 'runtime frames recorded as dropped');
+}
+
+// --- {log:false} → old behavior; slim() integration + trace stage ---
+{
+  const bigLog = mkLog('INFO processing request id=abc', 60) + '\nERROR boom\nERROR kapow';
+  const off = J.slim(bigLog, { log: false });
+  check('log-off-passthrough', !off.wasModified && off.reason === 'non-json' && off.output === bigLog, 'log:false → byte-identical non-json passthrough');
+  const on = J.slim(bigLog, { log: true });
+  check('log-on-compresses', on.wasModified && on.bytesOut < on.bytesIn && on.output.includes('ERROR boom') && on.output.includes('ERROR kapow'), 'log:true → compressed, both errors kept');
+  const traced = J.slim(bigLog, { log: true, trace: true });
+  check('log-on-trace-stage', Array.isArray(traced.stages) && traced.stages.includes('log'), `trace on → stages has 'log', got ${JSON.stringify(traced.stages)}`);
+  const noTrace = J.slim(bigLog, { log: true, trace: false });
+  check('log-off-trace-empty', noTrace.stages.length === 0, 'trace off → stages stays empty');
+  // a SHORT log (< minLinesForCcr) passes through byte-identical even when detected
+  const shortLog = mkLog('WARN retrying', 5);
+  const sres = J.slim(shortLog, { log: true });
+  check('log-short-passthrough', !sres.wasModified && sres.output === shortLog, 'short log → byte-identical passthrough (no gain)');
+}
+
+// --- finding 1: prose/markdown that MENTIONS error words is NOT a log → byte-identical passthrough ---
+// A 55-line troubleshooting doc that says "error"/"failed"/"warning" in ordinary sentences must stay
+// below the detector gate (the case-insensitive substring scan false-positived it and mangled it).
+{
+  const base = ['# Troubleshooting the checkout integration', '', 'When the checkout call fails, the storefront logs an error and the customer', 'sees a generic failure page. Below are the common causes and how to resolve.', '', '## Symptoms', '', '- A 500 error from the payment gateway means the request failed validation.', '- A warning in the console about a missing metafield is usually harmless.', '- If the theme editor shows a failed publish, re-save the section and retry.', ''];
+  const md = base.slice();
+  for (let i = 0; i < 44; i++) md.push(`Paragraph ${i}: the request occasionally fails and logs an error, but a warning here is expected and no failure is surfaced to the buyer.`);
+  const doc = md.join('\n');
+  check('log-detect-prose-mentions-not', !J.detectLog(doc).isLog, `55-line error-discussing doc must NOT detect as log (conf ${J.detectLog(doc).confidence.toFixed(3)})`);
+  const pr = J.slim(doc, { log: true });
+  check('log-prose-mentions-passthrough', !pr.wasModified && pr.reason === 'non-json' && pr.output === doc, 'error-discussing prose → byte-identical passthrough');
+  // a CHANGELOG-style doc (>=50 lines, headed "Fixed"/"Error handling") must also pass through
+  const chg = ['# Changelog', ''];
+  for (let i = 0; i < 60; i++) chg.push(`- Fixed a bug where the API returned an error on failed pagination (#${1000 + i}).`);
+  const chgDoc = chg.join('\n');
+  check('log-changelog-passthrough', !J.slim(chgDoc, { log: true }).wasModified, 'error-mentioning CHANGELOG → byte-identical passthrough');
+  // genuine lowercase-level logs (cargo/gcc `warning:` / `error[E…]`) must STILL detect as log
+  const cargo = [];
+  for (let i = 0; i < 12; i++) cargo.push(`warning: unused variable: \`x${i}\``);
+  cargo.push('error[E0308]: mismatched types');
+  check('log-detect-lowercase-levels', J.detectLog(cargo.join('\n')).isLog, 'lowercase cargo/gcc levels still detect as log');
+}
+
+// --- finding 2: the global cap must keep the guaranteed FIRST + LAST error, not the lowest line #s ---
+// Many score-1.0 error/fail lines overflow adaptiveMax; the sole distinct final failure (highest line
+// number) is exactly what a reader needs, and a plain score+lineNumber sort would evict it.
+{
+  const lines = [];
+  for (let i = 0; i < 24; i++) lines.push('ERROR generic failure alpha');
+  for (let i = 0; i < 24; i++) lines.push('FAILED build step beta');
+  lines.push('ERROR zzz_LAST_UNIQUE happened');
+  lines.push('done');
+  const r = L.compressLog(lines.join('\n'), {});
+  check('log-cap-keeps-last-error', r.compressed.includes('ERROR zzz_LAST_UNIQUE happened'), 'keepLastError line survives the adaptive global cap');
+  check('log-cap-keeps-first-error', r.compressed.split('\n')[0].includes('ERROR generic failure alpha'), 'keepFirstError line survives the adaptive global cap');
+}
+
+// --- findings 4 & 6: the omitted trailer reports OMITTED per-level counts, never totals ---
+// A kept error must not be listed as omitted, and the per-level breakdown must not exceed the omitted
+// total.
+{
+  const l = [];
+  for (let i = 0; i < 60; i++) l.push(`INFO processing ${i}`);
+  l.push('ERROR the one and only failure');
+  const r = L.compressLog(l.join('\n'), {});
+  const trailer = r.compressed.split('\n').find((x) => x.includes('lines omitted')) || '';
+  check('log-trailer-error-kept-not-omitted', r.compressed.includes('ERROR the one and only failure') && !/\bERROR\b/.test(trailer), `kept ERROR must not appear in the omitted trailer, got ${JSON.stringify(trailer)}`);
+  const m = trailer.match(/^\[(\d+) lines omitted: (.*)\]$/);
+  const omittedTotal = m ? Number(m[1]) : NaN;
+  const breakdownSum = m ? m[2].split(', ').reduce((a, p) => a + Number(p.split(' ')[0]), 0) : NaN;
+  check('log-trailer-breakdown-le-omitted', m && breakdownSum <= omittedTotal, `breakdown sum ${breakdownSum} must be ≤ omitted ${omittedTotal} (${JSON.stringify(trailer)})`);
+  check('log-trailer-info-count-is-dropped', /\b57 INFO\b/.test(trailer), `INFO count must be the 57 dropped (60 total − 3 kept context), got ${JSON.stringify(trailer)}`);
+}
+
+console.log(`json-slim fixtures: ${pass} passed, ${fail} failed  (smart-crusher parity ${byteExact} byte + ${valueOnly} value of 17; log-compressor upstream parity ${logParityTotal}/20 = ${logByteExact} byte-exact + ${logDeviation1.length} deviation#1-trailer)`);
 if (fail) { console.log(failures.join('\n')); process.exit(1); }

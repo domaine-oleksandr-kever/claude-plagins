@@ -489,5 +489,59 @@ if [ "$rc" -eq 0 ] && [ "$bignb" -gt 8388608 ] && grep -q 'NOT a JSONL row strea
    && ! grep -q '"profile":true' "$O" && ! grep -q '"rows":0' "$O" && [ "$spills" -eq 0 ]; then ok
 else bad J12-big-nonjsonl-notice "rc=$rc bignb=$bignb spills=$spills head=$(head -c 160 "$O")"; fi
 
+# ---------------------------------------------- json-slim.cjs: log/build-output compressor (M10) --
+# L1: the CLI on a synthetic 2000-line loop-warning console log (+ a handful of ERRORs and a Python
+# traceback) compresses ≥95% to ≤~30 lines — every ERROR + the trace head kept, the looping WARN
+# deduped `×N`, an omitted-count trailer that reports lines ACTUALLY omitted (the 5 kept ERRORs are
+# NOT listed as omitted; findings 4 & 6), and a final `original: <path>` line naming the on-disk
+# recovery source. This is signal-selection (the opposite of the JSONL profile path).
+LOGD="$TMP/logslim"; mkdir -p "$LOGD"
+LOGF="$LOGD/loop.log"
+node -e '
+  const l=[];
+  for(let i=0;i<2000;i++) l.push("WARNING: slow render loop detected, skipping frame :: retrying now");
+  for(const e of ["failed to load texture atlas","WebGL context lost","shader compilation failed","out of memory allocating framebuffer","fatal renderer teardown"]) l.push("ERROR: "+e);
+  l.push("Traceback (most recent call last):");
+  l.push("  File \"renderer.py\", line 88, in draw");
+  l.push("ValueError: invalid frame buffer handle");
+  require("fs").writeFileSync(process.argv[1], l.join("\n"));
+' "$LOGF"
+inb=$(wc -c < "$LOGF" | tr -d ' ')
+rc=0; FND_MCP_SLIM_DIR="$LOGD" node "$SLIM" "$LOGF" >"$O" 2>"$E" || rc=$?
+outb=$(wc -c < "$O" | tr -d ' ')
+outlines=$(wc -l < "$O" | tr -d ' ')
+errkept=$(grep -c 'ERROR:' "$O" || true)
+pct=$(node -e "console.log(100*(1-$outb/$inb))")
+if [ "$rc" -eq 0 ] && [ "$outlines" -le 30 ] && [ "$errkept" -eq 5 ] \
+   && grep -q 'retrying now ×2000' "$O" \
+   && grep -q 'Traceback (most recent call last):' "$O" \
+   && grep -q 'ValueError: invalid frame buffer handle' "$O" \
+   && grep -Eq '\[[0-9]+ lines omitted: [0-9]+ WARN\]' "$O" \
+   && ! grep -Eq 'lines omitted:[^]]*ERROR' "$O" \
+   && grep -Fq "original: $LOGF" "$O" \
+   && node -e "process.exit($outb/$inb < 0.05 ? 0 : 1)"; then ok
+else bad L1-log-cli-compress "rc=$rc lines=$outlines errkept=$errkept pct=$pct head=$(head -c 160 "$O")"; fi
+
+# L2: a prose / markdown docs-chunk file is NOT log-shaped — it passes through byte-identical (the CLI
+# emits the non-json handback naming the file, never a lossy compression).
+DOCF="$LOGD/doc.md"
+printf '## Fetching products\n\nUse the products connection to page through a catalogue.\nPagination is cursor-based; keep requesting until hasNextPage is false.\nSee the reference for the full list of connection fields.\n' > "$DOCF"
+rc=0; FND_MCP_SLIM_DIR="$LOGD" node "$SLIM" "$DOCF" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -Fq "read the file directly: $DOCF" "$O" && ! grep -q 'lines omitted' "$O"; then ok
+else bad L2-docs-passthrough "rc=$rc head=$(head -c 160 "$O")"; fi
+
+# L3 (finding 1): a 50+ line troubleshooting markdown doc that MENTIONS error/failed/warning words in
+# ordinary prose is NOT a log — the CLI must hand it back byte-identical, never compress+mangle it.
+TSHF="$LOGD/tshoot.md"
+node -e '
+  const md=["# Troubleshooting the checkout integration","","When the checkout call fails, the storefront logs an error and the customer","sees a generic failure page. Below are the common causes and how to resolve.","","## Symptoms","","- A 500 error from the payment gateway means the request failed validation.","- A warning in the console about a missing metafield is usually harmless.","- If the theme editor shows a failed publish, re-save the section and retry.",""];
+  for(let i=0;i<44;i++) md.push("Paragraph "+i+": the request occasionally fails and logs an error, but a warning here is expected and no failure is surfaced to the buyer.");
+  require("fs").writeFileSync(process.argv[1], md.join("\n"));
+' "$TSHF"
+inb=$(wc -c < "$TSHF" | tr -d ' ')
+rc=0; FND_MCP_SLIM_DIR="$LOGD" node "$SLIM" "$TSHF" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -Fq "read the file directly: $TSHF" "$O" && ! grep -q 'lines omitted' "$O"; then ok
+else bad L3-error-prose-passthrough "rc=$rc inb=$inb head=$(head -c 160 "$O")"; fi
+
 echo "scripts-sim: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then printf '%s' "$failures"; exit 1; fi
